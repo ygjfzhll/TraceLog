@@ -77,6 +77,9 @@ body:not(.authed) .shell { display:none; }
 .home-search .project { width:180px; }
 .home-search .kind { width:132px; }
 .home-search input { flex:1; min-width:160px; }
+.home-search .window { width:132px; flex:none; }
+.home-search input.time { width:168px; flex:none; }
+.home-search input.time[hidden] { display:none !important; }
 .home-search button { height:36px; white-space:nowrap; }
 #homeAttention tr { cursor:pointer; }
 #homeAttention td.uri { max-width:420px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -186,7 +189,7 @@ h2 { font-size:15px; margin:0 0 12px; font-weight:650; }
 <main>
 
 <section class="page show" id="page-home"><div class="top"><h1>首页</h1></div>
-<form class="card home-search" id="homeSearch"><select id="homeProject" class="project"></select><select id="homeKind" class="kind"><option value="trace_id">Trace ID</option><option value="log_id">日志 ID</option><option value="user_id">用户 ID</option></select><input id="homeKeyword" placeholder="输入后直接查看链路" /><button class="primary" type="submit">查询</button></form>
+<form class="card home-search" id="homeSearch"><select id="homeProject" class="project"></select><select id="homeKind" class="kind"><option value="trace_id">Trace ID</option><option value="log_id">日志 ID</option><option value="user_id">用户 ID</option></select><input id="homeKeyword" placeholder="输入后直接查看链路" /><select id="homeWindow" class="window"><option value="5m">最近 5 分钟</option><option value="15m">最近 15 分钟</option><option value="1h" selected>最近 1 小时</option><option value="6h">最近 6 小时</option><option value="custom">自定义</option></select><input id="homeFrom" class="time" type="datetime-local" hidden /><input id="homeTo" class="time" type="datetime-local" hidden /><button class="primary" type="submit">查询</button></form>
 <p class="meta" id="homeSearchStatus"></p>
 <section class="card" style="margin-top:14px"><h2>最近 1 小时报错最多的接口</h2><div id="homeAttention">正在加载…</div></section>
 <section class="card" id="homeReportCard" style="margin-top:14px"><h2>已保存的报表</h2><div id="homeReports">正在加载…</div></section></section>
@@ -807,21 +810,25 @@ async function openHomeIssue(item) {
   document.querySelector('[data-page="stats"]').click();
   await runStat({ key: "project-" + item.project_id, name: item.project_name || "统计结果", project_id: item.project_id, time_window: "1h", time_from: "", time_to: "", container_name: item.container_name || "", realtime: 0 });
 }
+$("homeWindow").onchange = () => { const custom = $("homeWindow").value === "custom"; $("homeFrom").hidden = !custom; $("homeTo").hidden = !custom; };
 $("homeSearch").onsubmit = (event) => {
   event.preventDefault();
   const projectId = $("homeProject").value;
   const keyword = $("homeKeyword").value.trim();
   const field = (window.fieldCache || []).find((item) => item.kind === $("homeKind").value && item.enabled) || (window.fieldCache || []).find((item) => item.kind === $("homeKind").value);
+  const timeWindow = $("homeWindow").value || "1h";
   if (!projectId || !keyword) { $("homeSearchStatus").textContent = "请选择项目并输入查询值"; return; }
   if (!field) { $("homeSearchStatus").textContent = "还没有这种查询条件"; return; }
+  if (timeWindow === "custom" && (!$("homeFrom").value || !$("homeTo").value)) { $("homeSearchStatus").textContent = "请选择开始和结束时间"; return; }
   $("homeSearchStatus").textContent = "";
   document.querySelector('[data-page="trace"]').click();
   $("traceWork").hidden = false;
   $("linkId").value = "";
   $("linkName").value = "";
   $("projectSelect").value = projectId;
-  $("searchWindow").value = "1h";
-  $("customTime").hidden = true;
+  $("searchWindow").value = timeWindow;
+  $("customTime").hidden = timeWindow !== "custom";
+  if (timeWindow === "custom") { $("searchForm").timeFrom.value = $("homeFrom").value; $("searchForm").timeTo.value = $("homeTo").value; }
   $("searchContainer").value = "";
   $("drillText").value = "";
   fillConditions([{ fieldId: field.id, keyword }]);
