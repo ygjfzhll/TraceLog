@@ -1,0 +1,1161 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<title>TraceLog</title>
+
+<style>
+:root { --ink:#1c2430; --muted:#64748b; --line:#e8edf3; --bg:#f4f7fb; --accent:#2563eb; --side:#0b1220; }
+* { box-sizing:border-box; }
+body { margin:0; font:14px/1.5 "Segoe UI", sans-serif; color:var(--ink); background:var(--bg); }
+button, input, select, textarea { font:inherit; }
+.shell { display:grid; grid-template-columns:208px 1fr; min-height:100vh; }
+aside { background:var(--side); color:#e5e7eb; padding:16px 12px; display:flex; flex-direction:column; height:100vh; position:sticky; top:0; }
+.brand { padding:4px 8px 16px; font-weight:650; }
+.nav button { width:100%; text-align:left; background:transparent; color:#d1d5db; border:0; border-radius:8px; padding:9px 10px; cursor:pointer; }
+.nav button.active { background:#1f2937; color:#fff; }
+.side-foot { margin-top:auto; display:flex; gap:8px; align-items:center; }
+.avatar { width:28px; height:28px; border-radius:50%; background:var(--accent); display:grid; place-items:center; }
+#logout { background:transparent; border:0; color:#94a3b8; cursor:pointer; }
+main { padding:24px 28px 40px; }
+.page { display:none; } .page.show { display:block; }
+.top { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+h1 { font-size:18px; margin:0; }
+.card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:16px 18px; }
+.grid { display:grid; grid-template-columns:320px 1fr; gap:14px; }
+#traceWork[hidden], .modal[hidden] { display:none !important; }
+label { display:block; color:var(--muted); font-size:12px; margin:10px 0 4px; }
+input, select, textarea { width:100%; padding:8px 10px; border:1px solid #d5d9e2; border-radius:8px; }
+button.primary { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; }
+button.ghost { background:#eef2ff; color:#24356b; border:0; border-radius:8px; padding:7px 10px; cursor:pointer; }
+.actions { display:flex; gap:8px; align-items:center; margin-top:12px; }
+table { width:100%; border-collapse:collapse; }
+th, td { text-align:left; padding:8px 6px; border-bottom:1px solid #f1f5f9; vertical-align:top; }
+th { color:var(--muted); font-size:12px; }
+.meta { color:var(--muted); font-size:12px; }
+.slow { color:#d92d20; font-weight:600; }
+.login { max-width:360px; margin:12vh auto; }
+body.authed #login { display:none; }
+body:not(.authed) .shell { display:none; }
+.row { padding:10px 8px; border-bottom:1px solid var(--line); cursor:pointer; }
+.row.active, .row:hover { background:#f8fafc; }
+.filters { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+.filters input { width:140px; }
+.brief pre, .step .raw { white-space:pre-wrap; background:#f8fafc; border-radius:8px; padding:10px 12px; }
+.step .raw { display:none; max-height:220px; overflow:auto; }
+.step.open .raw { display:block; }
+.step { display:grid; grid-template-columns:72px 1fr; gap:8px; padding:8px 0; border-bottom:1px solid var(--line); cursor:pointer; }
+.step.bad { color:#d92d20; }
+.fields { display:grid; grid-template-columns:1fr 1fr; gap:8px 16px; }
+.span-2 { grid-column:1 / -1; }
+.checks { display:flex; flex-wrap:wrap; gap:8px; }
+.checks label { margin:0; color:var(--ink); background:#f8fafc; border:1px solid var(--line); border-radius:8px; padding:6px 10px; }
+#hostBox[hidden] { display:none !important; }
+#hostChecks { flex-direction:column; align-items:stretch; max-height:240px; overflow:auto; }
+#hostChecks label { justify-content:flex-start; gap:8px; }
+.modal { position:fixed; inset:0; background:rgba(16,24,40,.45); display:flex; justify-content:center; padding:8vh 16px; }
+.sheet { width:min(560px,100%); background:#fff; border-radius:14px; padding:18px; max-height:80vh; overflow:auto; }
+.home-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.home-grid.single { grid-template-columns:1fr; }
+.home-search { display:flex; align-items:center; gap:8px; }
+.home-search select, .home-search input { width:auto; height:36px; margin:0; }
+.home-search .project { width:180px; }
+.home-search .kind { width:132px; }
+.home-search input { flex:1; min-width:160px; }
+.home-search button { height:36px; white-space:nowrap; }
+#homeAttention tr { cursor:pointer; }
+#homeAttention td.uri { max-width:420px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#homeReportCard[hidden] { display:none !important; }
+#statsTable td.uri { max-width:280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:#175cd3; }
+h2 { font-size:15px; margin:0 0 12px; font-weight:650; }
+.home-link { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:8px 0; border-bottom:1px solid var(--line); }
+.home-project { display:flex; align-items:baseline; justify-content:flex-start; gap:10px; padding:10px 2px; border-bottom:1px solid var(--line); }
+.home-link:last-child, .home-project:last-child { border-bottom:0; padding-bottom:0; }
+#statList[hidden] { display:none !important; }
+.home-link button { padding:4px 10px; }
+.home-project span { color:var(--muted); font-size:12px; }
+.stat-line { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:10px 0; border-bottom:1px solid var(--line); }
+.stat-line:last-child { border-bottom:0; padding-bottom:0; }
+.stat-line input, .stat-line select { width:auto; padding:6px 8px; }
+.stat-line .name { width:128px; }
+.stat-line .project { width:150px; }
+.stat-line .window { width:132px; }
+.stat-line .container { width:168px; }
+.stat-line .time { width:188px; }
+.stat-line input[hidden] { display:none !important; }
+.stat-line label { margin:0; display:flex; align-items:center; gap:4px; color:var(--ink); font-size:13px; }
+.stat-line input[type=checkbox] { width:auto; }
+.stat-line button { padding:6px 10px; }
+.stat-line button:disabled { opacity:.45; cursor:default; }
+.stat-line.active { background:#f8fafc; border-radius:8px; }
+#statResult[hidden] { display:none !important; }
+
+
+
+.bars { display:flex; flex-direction:column; gap:8px; }
+.bar-row { display:grid; grid-template-columns:minmax(80px,180px) 1fr 72px; gap:8px; align-items:center; }
+.bar-row span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.bar-track { background:#eef2ff; border-radius:99px; height:8px; }
+.bar-fill { background:#2563eb; height:8px; border-radius:99px; }
+.report-line { width:100%; height:220px; }
+.report-line polyline { fill:none; stroke:#2563eb; stroke-width:2; }
+.report-labels { display:flex; gap:8px; overflow:hidden; color:var(--muted); font-size:12px; }
+.report-labels span { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#reportChart[hidden] { display:none !important; }
+.report-axes { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px 16px; align-items:end; }
+.report-axes label { margin-top:0; }
+.report-axes select { min-height:38px; background:#fff; }
+
+#linkList td { vertical-align:middle; }
+#linkList .row-actions { white-space:nowrap; text-align:right; }
+#linkList .row-actions button { background:#fff; color:#334155; border:1px solid #e2e8f0; border-radius:6px; padding:3px 8px; margin-left:6px; cursor:pointer; font-size:12px; }
+#linkList .row-actions button:hover { background:#f8fafc; }
+#linkList .row-actions button.danger { color:#b42318; border-color:#fecdca; }
+#statsEditor[hidden] { display:none !important; }
+#feishuCard { display:none !important; }
+
+#page-stats > .top button.primary { height:34px; padding:0 14px; border-radius:8px; font-size:13px; }
+#projectStatList { padding:12px 18px; }
+.stat-project { display:flex; align-items:center; justify-content:space-between; width:100%; gap:16px; min-height:36px; padding:0; border-bottom:1px solid var(--line); }
+.stat-project:last-child { border-bottom:0; }
+.stat-project .lead, .stat-project .tools { display:contents; }
+.stat-project .pname { font-weight:650; font-size:14px; line-height:36px; white-space:nowrap; margin:0; }
+.stat-project select, .stat-project input.time { width:auto; height:36px; margin:0; padding:0 12px; border:1px solid #e6ebf2; border-radius:8px; background:#f8fafc; color:var(--ink); }
+.stat-project select.window { width:132px; }
+.stat-project select.container { width:168px; }
+.stat-project input.time { width:178px; }
+.stat-project input.time[hidden] { display:none !important; }
+.stat-project select:hover, .stat-project input.time:hover { background:#fff; border-color:#cbd5e1; }
+.stat-project select:focus, .stat-project input.time:focus { outline:none; background:#fff; border-color:#93c5fd; box-shadow:0 0 0 3px rgba(37,99,235,.12); }
+.stat-project label.realtime { height:36px; margin:0; padding:0 10px; display:inline-flex; align-items:center; gap:6px; border:1px solid #e6ebf2; border-radius:8px; background:#f8fafc; color:#334155; font-size:13px; white-space:nowrap; }
+.stat-project label.realtime input { width:auto; margin:0; }
+.stat-project label.realtime:has(input:checked) { background:#eff6ff; border-color:#bfdbfe; color:#1d4ed8; }
+#projectStatList .row-actions { display:inline-flex; align-items:center; gap:6px; }
+#projectStatList .row-actions button { height:36px; margin:0; padding:0 12px; background:#fff; color:#334155; border:1px solid #e6ebf2; border-radius:8px; cursor:pointer; font-size:13px; }
+#projectStatList .row-actions button.go { background:var(--accent); border-color:var(--accent); color:#fff; }
+#projectStatList .row-actions button:hover { background:#f8fafc; }
+#projectStatList .row-actions button.go:hover { background:#1d4ed8; }
+#reportList .row-actions { white-space:nowrap; text-align:right; }
+#reportList .row-actions button { background:#fff; color:#334155; border:1px solid #e2e8f0; border-radius:6px; padding:3px 8px; margin-left:6px; cursor:pointer; font-size:12px; }
+#reportList .row-actions button:hover { background:#f8fafc; }
+#reportList .row-actions button.danger { color:#b42318; border-color:#fecdca; }
+#reportForm[hidden], #reportChart[hidden], #reportTableCard[hidden] { display:none !important; }
+#dataSourceForm[hidden] { display:none !important; }
+#dataSourceTable .row-actions { white-space:nowrap; text-align:right; }
+#dataSourceTable .row-actions button { background:#fff; color:#334155; border:1px solid #e2e8f0; border-radius:6px; padding:3px 8px; margin-left:6px; cursor:pointer; font-size:12px; }
+#dataSourceTable .row-actions button:hover { background:#f8fafc; }
+#dataSourceTable .row-actions button.danger { color:#b42318; border-color:#fecdca; }
+#reportData th select { width:auto; min-width:128px; height:28px; margin:6px 0 0; padding:0 8px; font-size:12px; background:#fff; }
+#reportData th { vertical-align:bottom; }
+</style>
+</head>
+<body>
+<div id="login" class="card login"><h1>TraceLog</h1>
+<form id="loginForm"><label>用户名</label><input name="username" required /><label>密码</label><input name="password" type="password" required /><button class="primary" type="submit">登录</button><button class="ghost" id="anonymousLogin" type="button" style="margin-top:8px">匿名登录</button><p class="meta" id="loginStatus"></p></form></div>
+<div class="shell"><aside><div class="brand">TraceLog</div><nav class="nav">
+<button type="button" data-page="home" class="active">首页</button>
+<button type="button" data-page="trace">日志链路追踪</button>
+<button type="button" data-page="stats">接口统计</button>
+<button type="button" data-page="reports" data-report="1">日志报表</button>
+<button type="button" data-page="datasources" data-data="1">数据接入</button>
+<button type="button" data-page="projects">项目管理</button>
+<button type="button" data-page="sources" data-admin="1">日志接入</button>
+<button type="button" data-page="fields" data-admin="1">查询条件</button>
+<button type="button" data-page="users" data-admin="1">用户管理</button>
+</nav><div class="side-foot"><span class="avatar" id="avatar">A</span><span id="who"></span><button id="logout" type="button">退出</button></div></aside>
+<main>
+
+<section class="page show" id="page-home"><div class="top"><h1>首页</h1></div>
+<form class="card home-search" id="homeSearch"><select id="homeProject" class="project"></select><select id="homeKind" class="kind"><option value="trace_id">Trace ID</option><option value="log_id">日志 ID</option><option value="user_id">用户 ID</option></select><input id="homeKeyword" placeholder="输入后直接查看链路" /><button class="primary" type="submit">查询</button></form>
+<p class="meta" id="homeSearchStatus"></p>
+<section class="card" style="margin-top:14px"><h2>最近 1 小时报错最多的接口</h2><div id="homeAttention">正在加载…</div></section>
+<section class="card" id="homeReportCard" style="margin-top:14px"><h2>已保存的报表</h2><div id="homeReports">正在加载…</div></section></section>
+<section class="page" id="page-trace"><div class="top"><h1>日志链路追踪</h1><button class="primary" id="newLink" type="button">新建链路</button></div>
+<div class="card" id="linkList" style="margin-bottom:14px"></div>
+<div class="grid" id="traceWork" hidden>
+<form class="card" id="searchForm">
+<input type="hidden" id="linkId" /><input type="hidden" name="namespace" id="searchNamespace" /><input type="hidden" name="container" id="searchContainer" /><input type="hidden" name="allContainers" id="searchAllContainers" /><input type="hidden" name="drillText" id="drillText" />
+<label>链路名称</label><input id="linkName" />
+<label>项目</label><select name="projectId" id="projectSelect" required></select>
+<div id="conditionList"></div>
+<button class="ghost" id="addCondition" type="button">添加条件</button>
+<label>时间范围</label><select name="window" id="searchWindow"><option value="5m">最近 5 分钟</option><option value="15m">最近 15 分钟</option><option value="1h" selected>最近 1 小时</option><option value="6h">最近 6 小时</option><option value="custom">自定义</option></select>
+<div id="customTime" hidden><label>开始</label><input name="timeFrom" type="datetime-local" /><label>结束</label><input name="timeTo" type="datetime-local" /></div>
+<div class="actions"><button class="primary" type="submit">查看</button><button class="ghost" id="saveLink" type="button">保存</button></div>
+<p class="meta" id="searchStatus"></p></form>
+<div class="card"><div class="filters"><input id="filterUri" placeholder="接口" /><input id="filterService" placeholder="服务" /><label style="margin:0"><input id="filterFail" type="checkbox" style="width:auto" /> 只看失败</label><button class="ghost" id="exportTrace" type="button">导出文本</button></div>
+<div style="display:grid;grid-template-columns:280px 1fr;gap:12px"><div id="requestList" class="meta">查看一条链路后，这里列出请求。</div><div id="eventList"></div></div></div></div></section>
+<section class="page" id="page-stats"><div class="top"><h1>接口请求统计</h1><button class="primary" id="newStat" type="button">新增接口请求统计</button></div>
+<div class="card" id="projectStatList"></div>
+<div class="card" id="statsEditor" hidden><div class="top"><h2 id="statsEditTitle">编辑</h2><button class="ghost" id="statsEditClose" type="button">收起</button></div>
+<form class="card" id="statsForm"><div class="fields"><div><label>项目</label><select name="projectId" id="statsProject" required></select></div>
+<div><label>时间范围</label><select name="window" id="statsWindow"><option value="15m" selected>最近 15 分钟</option><option value="1h">最近 1 小时</option><option value="6h">最近 6 小时</option><option value="custom">自定义</option></select></div>
+<div id="statsCustom" class="span-2" hidden><label>开始</label><input name="timeFrom" type="datetime-local" /><label>结束</label><input name="timeTo" type="datetime-local" /></div></div>
+<div class="actions"><button class="primary" type="submit">统计</button><label style="margin:0"><input name="realtime" value="1" type="checkbox" style="width:auto" /> 实时</label><select id="statsContainer" name="container" style="width:220px"><option value="">全部容器</option></select><button class="ghost" id="exportStats" type="button">导出</button></div></form>
+<section class="card" id="feishuCard" data-admin="1" style="margin-top:14px">
+<div class="fields"><div class="span-2"><label>飞书机器人地址</label><input id="feishuWebhook" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..." /></div>
+<div><label>每天发送</label><input id="feishuTime" type="time" value="09:00" /></div>
+<div><label style="margin-top:28px"><input id="feishuEnabled" type="checkbox" style="width:auto" /> 开启</label></div></div>
+<div class="actions"><button class="primary" id="feishuSave" type="button">保存</button><button class="ghost" id="feishuSend" type="button">立即发送</button></div>
+<p class="meta" id="feishuStatus"></p></section></div>
+<div class="card" id="statList" hidden></div>
+<div class="card" id="statResult" style="margin-top:14px;overflow:auto" hidden><h2 id="statResultTitle">统计结果</h2><p class="meta" id="statsStatus"></p><table id="statsTable"></table></div>
+</section>
+<section class="page" id="page-projects"><div class="top"><h1>项目管理</h1><button class="primary" id="newProject" type="button">新建项目</button></div>
+<div class="card"><table id="projectTable"></table></div>
+<form class="modal" id="projectForm" hidden><div class="sheet"><div class="fields">
+<div><label>项目名称</label><input name="name" required /></div>
+<div class="span-2"><label>日志地址</label><div class="checks" id="sourceChecks"></div></div>
+<div><label>运行方式</label><select name="deployMode" id="deployMode"><option value="kubernetes">Kubernetes</option><option value="host">主机</option></select></div>
+<div class="span-2" id="scopeBox"><label id="scopeLabel">命名空间（可多个）</label><textarea name="namespace" id="namespaceInput" rows="3"></textarea><div id="hostBox" hidden><div class="checks" id="hostChecks"></div><p class="meta" id="hostStatus"></p></div></div>
+<div><label>说明</label><input name="remark" /></div>
+<div><label>慢接口阈值（毫秒）</label><input name="slowMs" type="number" value="500" /></div>
+</div><input type="hidden" name="id" id="projectId" /><input type="hidden" name="containers" id="containerValue" />
+<div class="actions"><button class="primary" id="projectSubmit" type="submit">添加项目</button><button class="ghost" id="projectCancel" type="button">取消</button></div>
+<p class="meta" id="projectStatus"></p></div></form></section>
+<section class="page" id="page-sources"><div class="top"><h1>日志接入</h1></div>
+<form class="card" id="sourceForm"><div class="fields">
+<div><label>名称</label><input name="name" required /></div><div><label>地址</label><input name="baseUrl" required /></div>
+<div><label>Account ID</label><input name="accountId" value="1" /></div><div><label>Project ID</label><input name="projectId" value="1" /></div>
+</div><button class="primary" type="submit">添加</button><p class="meta" id="sourceStatus"></p></form>
+<div class="card" style="margin-top:14px"><table id="sourceTable"></table></div></section>
+<section class="page" id="page-fields"><div class="top"><h1>查询条件</h1></div>
+<form class="card" id="fieldForm"><div class="fields">
+<div><label>名称</label><input name="name" required /></div>
+<div><label>匹配方式</label><select name="kind" id="fieldKind"><option value="user_id">用户 ID</option><option value="trace_id">Trace ID</option><option value="log_id">日志 ID</option><option value="contains">日志包含</option><option value="template">自定义模板</option></select></div>
+<div class="span-2" id="patternBox" hidden><label>模板，用 {value}</label><textarea name="pattern" rows="3"></textarea></div>
+</div><input type="hidden" name="id" id="fieldId" /><button class="primary" type="submit">添加条件</button><p class="meta" id="fieldStatus"></p></form>
+<div class="card" style="margin-top:14px"><table id="fieldTable"></table></div></section>
+<section class="page" id="page-users"><div class="top"><h1>用户管理</h1><button class="primary" id="openUser" type="button">添加用户</button><button class="ghost" id="openPassword" type="button">修改我的密码</button></div>
+<div class="card"><table id="userTable"></table></div>
+<form class="modal" id="userForm" hidden><div class="sheet"><h2 id="userFormTitle">添加用户</h2>
+<label>用户名</label><input name="username" id="userName" required />
+<div id="userPasswordBox"><label>密码</label><input name="password" type="password" /></div>
+<label><input type="checkbox" id="canCreateProject" name="canCreateProject" value="1" style="width:auto" /> 允许新建项目</label>
+<label><input type="checkbox" id="canDataSource" name="canDataSource" value="1" style="width:auto" /> 允许数据接入</label>
+<label><input type="checkbox" id="canReport" name="canReport" value="1" style="width:auto" /> 允许日志报表</label>
+<label>可查看的项目</label><div id="grantProjects" class="checks"></div>
+<label>可查看的数据源</label><div id="grantSources" class="checks"></div><input type="hidden" id="userEditing" />
+<div class="actions"><button class="primary" type="submit">保存</button><button class="ghost" type="button" data-close="userForm">取消</button></div>
+<p class="meta" id="userStatus"></p></div></form>
+<form class="modal" id="passwordForm" hidden><div class="sheet">
+<label>当前密码</label><input name="oldPassword" type="password" required /><label>新密码</label><input name="newPassword" type="password" required />
+<div class="actions"><button class="primary" type="submit">保存</button><button class="ghost" type="button" data-close="passwordForm">取消</button></div>
+<p class="meta" id="passwordStatus"></p></div></form></section>
+
+<section class="page" id="page-datasources"><div class="top"><h1>数据接入</h1><button class="primary" id="dataSourceNew" type="button">新建数据接入</button></div>
+<div class="card"><table id="dataSourceTable"></table></div>
+<form class="card" id="dataSourceForm" hidden style="margin-top:14px"><div class="top"><h2 id="dataSourceTitle">新建数据接入</h2><button class="ghost" id="dataSourceClose" type="button">收起</button></div><input type="hidden" id="dataSourceId" />
+<div class="fields">
+<div><label>名称</label><input name="name" required /></div>
+<div><label>主机</label><input name="host" placeholder="127.0.0.1" required /></div>
+<div><label>端口</label><input name="port" value="3306" required /></div>
+<div><label>用户名</label><input name="username" required /></div>
+<div><label>密码</label><input name="password" id="dataSourcePassword" type="password" placeholder="已保存的密码不会再显示，不修改请留空" /></div>
+<div><label>数据库</label><input name="database" required /></div>
+</div>
+<div class="actions"><button class="primary" id="dataSourceSubmit" type="submit">保存</button><button class="ghost" id="dataSourceTest" type="button">测试连接</button></div>
+</form>
+<p class="meta" id="dataSourceStatus"></p></section>
+<section class="page" id="page-reports"><div class="top"><h1>日志报表</h1><button class="primary" id="reportNew" type="button">新建报表</button></div>
+<div class="card" id="reportList"></div>
+<form class="card" id="reportForm" hidden style="margin-top:14px"><div class="top"><h2 id="reportEditTitle">新建报表</h2><button class="ghost" id="reportEditClose" type="button">收起</button></div>
+<input type="hidden" id="reportId" />
+<div class="fields">
+<div class="span-2"><label>报表名称</label><input id="reportName" placeholder="例如：每天每台机器任务量" /></div>
+<div><label>数据源</label><select id="reportSource" required></select></div>
+<div><label>数据表</label><select id="reportTable"><option value="">请选择</option></select></div>
+<div class="span-2 report-axes"><div><label>图表</label><select id="reportKind"><option value="bar">柱状图</option><option value="line">折线图</option><option value="table">仅表格</option></select></div>
+<div><label>横轴</label><select id="reportX"><option value="">自动</option></select></div>
+<div><label>纵轴</label><select id="reportY"><option value="">自动</option></select></div></div>
+<div class="span-2"><label>查询语句</label><textarea id="reportSql" rows="4" placeholder="SELECT * FROM table_name LIMIT 100"></textarea></div>
+</div>
+<div class="actions"><button class="primary" type="submit">绘制</button><button class="ghost" id="reportSave" type="button">保存</button></div>
+</form>
+<p class="meta" id="reportStatus"></p>
+<div class="card" id="reportChart" style="margin-top:14px" hidden></div>
+<div class="card" id="reportTableCard" style="margin-top:14px;overflow:auto" hidden><table id="reportData"></table></div></section>
+</main></div>
+<script>
+
+const $ = (id) => document.getElementById(id);
+function formBody(form) { return new URLSearchParams(new FormData(form)); }
+async function api(url, options) { const res = await fetch(url, options); const body = await res.json().catch(() => ({})); if (!res.ok) throw new Error(body.error || "请求失败"); return body; }
+function esc(value) { return String(value ?? "").replace(/[&<>"]/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[ch])); }
+function fmt(value) { return value ? String(value).replace("T"," ").slice(0,19) : ""; }
+document.querySelectorAll(".nav button").forEach((button) => { button.onclick = () => { document.querySelectorAll(".nav button").forEach((item) => item.classList.remove("active")); button.classList.add("active"); document.querySelectorAll(".page").forEach((page) => page.classList.remove("show")); $("page-" + button.dataset.page).classList.add("show"); if (button.dataset.page === "trace") $("traceWork").hidden = true; if (button.dataset.page === "stats") loadSavedStats(); if (button.dataset.page === "datasources") loadDataSources(); if (button.dataset.page === "home") loadHome(); if (button.dataset.page === "reports") { loadDataSources("report"); loadSavedReports(); } if (button.dataset.page === "stats") loadProjectStats(); }; });
+$("loginForm").onsubmit = async (event) => { event.preventDefault(); try { await api("/api/login", { method:"POST", body: formBody(event.target) }); const me = await api("/api/me"); enter(me.username, me.isAdmin, me.canCreateProject, me.canDataSource, me.canReport); } catch (error) { $("loginStatus").textContent = error.message; } };
+$("anonymousLogin").onclick = async () => { $("loginStatus").textContent = ""; try { await api("/api/login/anonymous", { method:"POST" }); const me = await api("/api/me"); enter(me.username, me.isAdmin, me.canCreateProject, me.canDataSource, me.canReport); } catch (error) { $("loginStatus").textContent = error.message; } };
+$("logout").onclick = async () => { await fetch("/api/logout", { method:"POST" }); location.reload(); };
+let current = null, savedLinks = [], statsRows = [], statsKind = "api", statsSortKey = "hits", statsSortDir = -1, statsNewMode = false, slowMs = 500;
+function isLoose(key) { return String(key || "").startsWith("unlinked:"); }
+function durationMs(item) { const text = String(item && item.duration || "").trim().toLowerCase().replace(/\s/g, ""); if (text.endsWith("ms")) return Number(text.slice(0,-2)) || 0; if (text.endsWith("s")) return (Number(text.slice(0,-1)) || 0) * 1000; return Number(text) || 0; }
+function businessCode(item) {
+  const msg = String((item && (item.message || item.summary)) || "");
+  const match = msg.match(/"code"\s*:\s*"?(0|[1-9]\d{0,8})"?/);
+  return match ? match[1] : "";
+}
+function failureText(item) {
+  const biz = businessCode(item);
+  if (biz && biz !== "0") return "code=" + biz;
+  if (Number(item.status_code) >= 400) return "HTTP " + item.status_code;
+  return "";
+}
+function failed(item) {
+  const biz = businessCode(item);
+  if (biz && biz !== "0") return true;
+  return Number(item.status_code) >= 400;
+}
+function requestEvents(key) { return ((current && current.events) || []).filter((item) => item.request_key === key); }
+function serviceNames(events) { const names = []; events.forEach((item) => { const name = item.container_name || ""; if (name && !names.includes(name)) names.push(name); }); return names; }
+function slowestEvent(events) { let found = null; events.forEach((item) => { if (durationMs(item) <= 0) return; if (!found || durationMs(item) > durationMs(found)) found = item; }); return found; }
+function mainEvent(events) { const withUri = events.filter((item) => item.uri); return slowestEvent(withUri.length ? withUri : events) || events[0] || null; }
+function stepText(item) { const uri = String(item.uri || "").split("?")[0]; if (!uri) return item.summary || "其他日志"; return ((item.http_method ? item.http_method + " " : "") + uri); }
+function chainTitle(key) { if (isLoose(key)) return "无法串成链路"; const hit = mainEvent(requestEvents(key)); return hit && hit.uri ? stepText(hit) : ((hit && hit.summary) || key); }
+function callGroups(events) {
+  const map = new Map();
+  events.forEach((item) => {
+    const label = stepText(item);
+    const id = (item.container_name || "") + "\n" + label;
+    let group = map.get(id);
+    if (!group) group = { container: item.container_name || "", label, count: 0, fail: 0, max: 0, first: item.event_time || "", sample: item.message || item.summary || "", failText: "" };
+    group.count += 1;
+    if (item.event_time && (!group.first || item.event_time < group.first)) group.first = item.event_time;
+    if (failed(item)) {
+      group.fail += 1;
+      if (!group.failText) group.failText = failureText(item);
+      group.sample = item.message || item.summary || group.sample;
+    }
+    const ms = durationMs(item);
+    if (ms >= group.max) {
+      group.max = ms;
+      if (!failed(item)) group.sample = item.message || item.summary || group.sample;
+    }
+    map.set(id, group);
+  });
+  return [...map.values()];
+}
+function isRepeat(group) {
+  const label = String(group.label || "").toLowerCase();
+  if (group.count >= 3 && /\/status|heartbeat|心跳|poll/.test(label)) return true;
+  return group.count >= 20;
+}
+function journeyOf(events) {
+  const groups = callGroups(events);
+  const main = groups.filter((item) => !isRepeat(item)).sort((a, b) => String(a.first).localeCompare(String(b.first)));
+  const repeats = groups.filter(isRepeat).sort((a, b) => b.count - a.count);
+  const times = events.map((item) => item.event_time).filter(Boolean).sort();
+  return { main, repeats, start: times[0] || "", end: times[times.length - 1] || "" };
+}
+function developerBrief(key, events) {
+  const story = journeyOf(events);
+  const failedSteps = [...story.main, ...story.repeats].filter((item) => item.fail);
+  const lines = [
+    story.start ? "时间：" + fmt(story.start) + (story.end && story.end !== story.start ? " 至 " + fmt(story.end) : "") : "",
+    isLoose(key) ? "这条日志没有编号，无法对应一次请求。" : "Trace ID：" + key,
+    "主调用："
+  ].filter(Boolean);
+  if (!story.main.length) lines.push("没有单独的主调用");
+  story.main.forEach((item, index) => lines.push((index + 1) + ". " + fmt(item.first).slice(11) + "  " + item.container + "  " + item.label + (item.max ? "  " + Math.round(item.max) + " ms" : "") + (item.fail ? "  失败 " + item.failText : "")));
+  if (story.repeats.length) {
+    lines.push("重复查询：");
+    story.repeats.forEach((item) => lines.push("- " + item.container + "  " + item.label + "  重复 " + item.count + " 次" + (item.max ? "，最慢 " + Math.round(item.max) + " ms" : "") + (item.fail ? "，失败 " + item.fail : "")));
+  }
+  lines.push(failedSteps.length ? "失败：" + failedSteps.map((item) => item.label + " " + item.failText).join("；") : "失败：无");
+  return lines.join("\n");
+}
+function filteredRequests() { if (!current) return []; const uri = ($("filterUri").value || "").trim().toLowerCase(); const service = ($("filterService").value || "").trim().toLowerCase(); const onlyFail = $("filterFail").checked; return current.requests.filter((item) => { const events = requestEvents(item.request_key); if (onlyFail && !events.some(failed)) return false; if (service && !serviceNames(events).join(" ").toLowerCase().includes(service)) return false; if (uri && !events.some((event) => stepText(event).toLowerCase().includes(uri))) return false; return true; }); }
+function renderRequests() { const rows = filteredRequests(); $("requestList").innerHTML = rows.map((item) => { const events = requestEvents(item.request_key); const slow = slowestEvent(events); const failedCount = events.filter(failed).length; const meta = [serviceNames(events).length + " 个服务", events.length + " 步", slow ? "最慢 " + Math.round(durationMs(slow)) + " ms" : "", failedCount ? failedCount + " 步失败" : "无失败"].join(" · "); return `<div class="row" data-key="${encodeURIComponent(item.request_key)}"><b>${esc(chainTitle(item.request_key))}</b><br><span class="meta">${esc(meta)}</span></div>`; }).join("") || '<p class="meta">没有符合筛选的请求。</p>'; $("requestList").querySelectorAll(".row").forEach((row) => row.onclick = () => showRequest(decodeURIComponent(row.dataset.key))); if (rows[0]) showRequest(rows[0].request_key); else $("eventList").innerHTML = ""; }
+function showRequest(key) {
+  document.querySelectorAll("#requestList .row").forEach((row) => row.classList.toggle("active", row.dataset.key === key));
+  const events = requestEvents(key);
+  const story = journeyOf(events);
+  const brief = developerBrief(key, events);
+  const rowHtml = (item) => `<tr class="journey" data-sample="${esc(item.sample)}"><td>${esc(fmt(item.first).slice(11))}</td><td>${esc(item.container)}</td><td>${esc(item.label)}</td><td>${item.count > 1 ? "重复 " + item.count + " 次" : "1 次"}</td><td>${item.max ? Math.round(item.max) + " ms" : "-"}</td><td class="${item.fail ? "slow" : ""}">${item.fail ? item.failText || (item.fail + " 步") : "无"}</td></tr>`;
+  const mainRows = story.main.map(rowHtml).join("") || `<tr><td colspan="6" class="meta">没有单独的主调用</td></tr>`;
+  const repeatRows = story.repeats.map(rowHtml).join("");
+  const repeatBlock = repeatRows ? `<h3>重复查询</h3><table><tr><th>时间</th><th>服务</th><th>接口</th><th>次数</th><th>最慢</th><th>失败</th></tr>${repeatRows}</table>` : "";
+  $("eventList").innerHTML = `<div class="brief"><b>链路追踪步骤如下</b> <button class="ghost" id="copyBrief" type="button">复制</button><pre>${esc(brief)}</pre></div><h3>这次经过</h3><p class="meta">${esc(fmt(story.start))} 至 ${esc(fmt(story.end))}。点一行看对应日志。</p><table><tr><th>时间</th><th>服务</th><th>接口</th><th>次数</th><th>最慢</th><th>失败</th></tr>${mainRows}</table>${repeatBlock}<pre id="pickedLog" class="raw" style="display:none"></pre>`;
+  $("copyBrief").onclick = async () => { try { await navigator.clipboard.writeText(brief); $("copyBrief").textContent = "已复制"; } catch (error) { $("copyBrief").textContent = "请手动复制上面的文字"; } };
+  $("eventList").querySelectorAll("tr.journey").forEach((row) => row.onclick = () => {
+    const box = $("pickedLog");
+    box.style.display = "block";
+    box.textContent = row.dataset.sample || "这条没有原文";
+  });
+}
+$("exportTrace").onclick = () => { if (!current) return; const lines = filteredRequests().map((item) => developerBrief(item.request_key, requestEvents(item.request_key))).join("\n\n"); const link = document.createElement("a"); link.href = URL.createObjectURL(new Blob([lines], {type:"text/plain"})); const fileStem = [($("linkName").value || ""), ...currentConditions().map((item) => item.keyword)].map((value) => String(value).replace(/[\\/:*?"<>|\r\n]/g, "").trim()).filter(Boolean).join("_").replace(/[. ]+$/g, ""); link.download = (fileStem || "链路") + ".txt"; link.click(); };
+$("filterUri").oninput = renderRequests; $("filterService").oninput = renderRequests; $("filterFail").onchange = renderRequests;
+function addCondition(item) { const row = document.createElement("div"); row.innerHTML = `<label>查询条件</label><div style="display:flex;gap:6px"><select class="field">${window.fieldOptions || ""}</select><input class="keyword" /><button class="ghost remove" type="button">移除</button></div>`; row.querySelector(".remove").onclick = () => { if ($("conditionList").children.length > 1) row.remove(); }; $("conditionList").appendChild(row); if (item && item.fieldId) row.querySelector(".field").value = item.fieldId; if (item && item.keyword) row.querySelector(".keyword").value = item.keyword; }
+function fillConditions(items) { $("conditionList").innerHTML = ""; (items && items.length ? items : [{}]).forEach(addCondition); }
+function currentConditions() { return [...$("conditionList").querySelectorAll(".keyword")].map((input, index) => ({ fieldId: $("conditionList").querySelectorAll(".field")[index].value, keyword: input.value.trim() })).filter((item) => item.keyword); }
+$("addCondition").onclick = () => addCondition();
+$("searchWindow").onchange = () => { $("customTime").hidden = $("searchWindow").value !== "custom"; };
+$("searchForm").onsubmit = async (event) => { event.preventDefault(); const body = formBody(event.target); body.set("conditions", JSON.stringify(currentConditions())); body.set("linkId", $("linkId").value); if ($("searchAllContainers").value !== "1") body.delete("allContainers"); $("searchAllContainers").value = ""; $("searchStatus").textContent = "正在查找…"; try { current = await api("/api/search", { method:"POST", body }); const loose = (current.requests || []).filter((item) => item.unlinked || isLoose(item.request_key)).length; $("searchStatus").textContent = `找到 ${current.events.length} 条日志，归成 ${(current.requests || []).length - loose} 次请求` + (loose ? `，${loose} 条无法串成链路` : "") + "。" + (current.note || ""); renderRequests(); if ($("linkId").value) loadLinks(); } catch (error) { $("searchStatus").textContent = error.message; } };
+
+function describeConditions(item) { let rows = []; try { rows = JSON.parse(item.conditions_json || "[]"); } catch (error) { rows = []; } return rows.filter((row) => row.keyword).map((row) => `${(window.fieldNames || {})[row.fieldId] || "条件"}=${row.keyword}`).join("；"); }
+function describeWindow(item) { const labels = { "5m":"最近 5 分钟", "15m":"最近 15 分钟", "1h":"最近 1 小时", "6h":"最近 6 小时" }; return item.time_window === "custom" ? `${item.time_from || ""} 至 ${item.time_to || ""}` : (labels[item.time_window] || ""); }
+async function loadLinks() { const body = await api("/api/links"); savedLinks = body.links || []; $("linkList").innerHTML = savedLinks.length ? "<table><tr><th>名称</th><th>项目</th><th>查询条件</th><th>时间</th><th>最近结果</th><th></th></tr>" + savedLinks.map((item) => `<tr><td>${esc(item.name)}</td><td>${esc(item.project_name || "")}</td><td>${esc(describeConditions(item))}</td><td>${esc(describeWindow(item))}</td><td>${esc(item.last_checked_at ? fmt(item.last_checked_at) + "，" + (item.last_event_count || 0) + " 条" : "还没查过")}</td><td class="row-actions"><button data-action="view" data-id="${item.id}" type="button">查看</button><button data-action="edit" data-id="${item.id}" type="button">编辑</button><button class="danger" data-action="delete" data-id="${item.id}" type="button">删除</button></td></tr>`).join("") + "</table>" : "<p class='meta'>还没有保存的链路。</p>"; $("linkList").querySelectorAll("button").forEach((button) => button.onclick = () => useLink(button.dataset.id, button.dataset.action)); }
+function useLink(id, action) { const item = savedLinks.find((link) => String(link.id) === String(id)); if (!item) return; if (action === "delete") { if (!confirm("删除这条链路？")) return; api("/api/links/delete", { method:"POST", body: new URLSearchParams({id}) }).then(loadLinks); return; } $("linkId").value = action === "edit" ? item.id : ""; $("linkName").value = item.name; $("projectSelect").value = item.project_id; $("searchWindow").value = item.time_window || "1h"; $("searchForm").timeFrom.value = item.time_from || ""; $("searchForm").timeTo.value = item.time_to || ""; $("customTime").hidden = item.time_window !== "custom"; let conditions = []; try { conditions = JSON.parse(item.conditions_json || "[]"); } catch (error) { conditions = []; } fillConditions(conditions); $("traceWork").hidden = false; if (action === "view") $("searchForm").requestSubmit(); }
+$("newLink").onclick = () => { $("linkId").value = ""; $("linkName").value = ""; fillConditions([{}]); $("searchStatus").textContent = ""; $("traceWork").hidden = false; };
+$("saveLink").onclick = async () => { const body = formBody($("searchForm")); body.set("name", $("linkName").value.trim()); body.set("id", $("linkId").value); body.set("conditions", JSON.stringify(currentConditions())); try { await api("/api/links", { method:"POST", body }); $("searchStatus").textContent = "已保存"; $("traceWork").hidden = true; loadLinks(); } catch (error) { $("searchStatus").textContent = error.message; } };
+function hasNumber(value) { return value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value)); }
+function msText(value) { if (!hasNumber(value)) return "-"; const n = Number(value); return (n >= 100 ? n.toFixed(0) : n.toFixed(1)) + " ms"; }
+function sortedStats() { return statsRows.slice().sort((a, b) => { if (["uri","container_name","first_seen","namespace_name","method"].includes(statsSortKey)) return String(a[statsSortKey] || "").localeCompare(String(b[statsSortKey] || "")) * statsSortDir; const x = Number(a[statsSortKey]), y = Number(b[statsSortKey]); if (!Number.isFinite(x)) return 1; if (!Number.isFinite(y)) return -1; return (x - y) * statsSortDir; }); }
+function statsColumns() { const columns = [["container_name","容器"],["method","请求方法"],["uri", statsKind === "task" ? "任务" : "接口"]]; if (statsNewMode) { const names = [...new Set(statsRows.map((item) => item.namespace_name).filter(Boolean))]; if (names.length > 1) columns.push(["namespace_name","命名空间"]); columns.push(["first_seen","首次出现"]); } columns.push(["hits","次数"],["errors","失败"],["avg_ms","平均"],["p95_ms","P95"],["max_ms","最大"]); return columns; }
+function renderStats() { const columns = statsColumns(); const rows = sortedStats(); $("statsTable").innerHTML = "<tr>" + columns.map(([key, label]) => `<th data-key="${key}">${label}</th>`).join("") + "</tr>" + rows.map((item) => "<tr>" + columns.map(([key]) => { if (["avg_ms","p95_ms","max_ms"].includes(key)) return `<td class="${hasNumber(item[key]) && Number(item[key]) > slowMs ? "slow" : ""}">${msText(item[key])}</td>`; if (key === "method") return `<td>${esc(item.method || "-")}</td>`; if (key === "uri") return `<td class="uri" title="${esc(item.uri)}">${esc(item.uri || "")}</td>`; return `<td class="${key === "errors" && Number(item.errors) ? "slow" : ""}">${esc(item[key] ?? "")}</td>`; }).join("") + "</tr>").join(""); $("statsTable").querySelectorAll("th").forEach((cell) => cell.onclick = () => { statsSortDir = statsSortKey === cell.dataset.key ? -statsSortDir : -1; statsSortKey = cell.dataset.key; renderStats(); }); $("statsTable").querySelectorAll("tr").forEach((row, index) => { if (index) row.onclick = () => openStatsRow(rows[index - 1]); }); }
+let savedStats = [];
+let statDrafts = [];
+let statResults = {};
+let activeStatKey = "";
+let editingStats = {};
+let containerCache = {};
+let draftSeq = 1;
+
+function statKey(item) { return item.key || ""; }
+function statItems() { return statDrafts.concat(savedStats); }
+function projectOptions(selected) {
+  return (window.projectCache || []).map((item) => `<option value="${item.id}"${String(item.id) === String(selected) ? " selected" : ""}>${esc(item.name)}</option>`).join("");
+}
+async function projectContainers(projectId) {
+  if (!projectId) return [];
+  if (containerCache[projectId]) return containerCache[projectId];
+  const result = await api("/api/stats/containers", { method:"POST", body: new URLSearchParams({projectId}) });
+  containerCache[projectId] = result.containers || [];
+  return containerCache[projectId];
+}
+function readStatLine(line) {
+  return {
+    key: line.dataset.key,
+    name: line.querySelector(".name").value.trim(),
+    project_id: line.querySelector(".project").value,
+    time_window: line.querySelector(".window").value,
+    time_from: line.querySelector(".from").value,
+    time_to: line.querySelector(".to").value,
+    container_name: line.querySelector(".container").value,
+    realtime: line.querySelector(".realtime").checked ? 1 : 0
+  };
+}
+function bindStatLine(line) {
+  line.querySelector(".window").onchange = () => {
+    const custom = line.querySelector(".window").value === "custom";
+    line.querySelector(".from").hidden = !custom;
+    line.querySelector(".to").hidden = !custom;
+  };
+  line.querySelector(".project").onchange = async () => {
+    const select = line.querySelector(".container");
+    const containers = await projectContainers(line.querySelector(".project").value);
+    select.innerHTML = "<option value=''>全部容器</option>" + containers.map((item) => `<option value="${esc(item.name)}">${esc(item.name)}</option>`).join("");
+  };
+  line.querySelectorAll("button").forEach((button) => { button.onclick = () => actStat(line, button.dataset.act); });
+}
+async function renderStatRows() {
+  const box = $("statList");
+  if (!box) return;
+  const items = statItems();
+  if (!items.length) { box.innerHTML = ""; box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = items.map((item) => {
+    const key = statKey(item);
+    const editing = !!item.draft || !!editingStats[key];
+    const dis = editing ? "" : " disabled";
+    const custom = item.time_window === "custom";
+    return `<div class="stat-line${key === activeStatKey ? " active" : ""}" data-key="${esc(key)}"><input class="name" placeholder="名称" value="${esc(item.name || "")}"${dis} /><select class="project"${dis}>${projectOptions(item.project_id)}</select><select class="window"${dis}><option value="15m"${item.time_window === "15m" ? " selected" : ""}>最近 15 分钟</option><option value="1h"${item.time_window === "1h" ? " selected" : ""}>最近 1 小时</option><option value="6h"${item.time_window === "6h" ? " selected" : ""}>最近 6 小时</option><option value="custom"${item.time_window === "custom" ? " selected" : ""}>自定义</option></select><input class="time from" type="datetime-local" value="${esc(item.time_from || "")}"${custom ? "" : " hidden"}${dis} /><input class="time to" type="datetime-local" value="${esc(item.time_to || "")}"${custom ? "" : " hidden"}${dis} /><select class="container"${dis}><option value="">全部容器</option></select><label><input class="realtime" type="checkbox"${item.realtime ? " checked" : ""}${dis} /> 实时</label><button class="primary" data-act="run" type="button">统计</button><button class="ghost" data-act="save" type="button"${editing ? "" : " disabled"}>保存</button><button class="ghost" data-act="edit" type="button"${item.draft || editing ? " disabled" : ""}>修改</button><button class="ghost" data-act="export" type="button">导出</button><button class="ghost" data-act="delete" type="button">删除</button></div>`;
+  }).join("");
+  for (const line of box.querySelectorAll(".stat-line")) {
+    const item = statItems().find((row) => statKey(row) === line.dataset.key);
+    const select = line.querySelector(".container");
+    const containers = await projectContainers(line.querySelector(".project").value);
+    const current = item && item.container_name || "";
+    select.innerHTML = "<option value=''>全部容器</option>" + containers.map((row) => `<option value="${esc(row.name)}"${row.name === current ? " selected" : ""}>${esc(row.name)}</option>`).join("");
+    bindStatLine(line);
+  }
+}
+async function loadSavedStats() {
+  const body = await api("/api/saved-stats/list", { method:"POST", body: new URLSearchParams() });
+  savedStats = (body.stats || []).map((item) => ({ ...item, key: "id-" + item.id, draft: false }));
+  renderStatRows();
+}
+async function actStat(line, act) {
+  const data = readStatLine(line);
+  const item = statItems().find((row) => statKey(row) === data.key) || {};
+  if (act === "edit") {
+    editingStats[data.key] = true;
+    Object.assign(item, data);
+    renderStatRows();
+    return;
+  }
+  if (act === "delete") {
+    if (item.draft) { statDrafts = statDrafts.filter((row) => statKey(row) !== data.key); renderStatRows(); return; }
+    if (!confirm("删除这条统计？")) return;
+    await api("/api/saved-stats/delete", { method:"POST", body: new URLSearchParams({id: item.id}) });
+    delete statResults[data.key];
+    delete editingStats[data.key];
+    await loadSavedStats();
+    return;
+  }
+  if (act === "save") {
+    try {
+      await api("/api/saved-stats", { method:"POST", body: new URLSearchParams({name: data.name, projectId: data.project_id, window: data.time_window, timeFrom: data.time_from, timeTo: data.time_to, container: data.container_name, realtime: data.realtime ? "1" : "0", id: item.id || ""}) });
+      if (item.draft) statDrafts = statDrafts.filter((row) => statKey(row) !== data.key);
+      delete editingStats[data.key];
+      await loadSavedStats();
+    } catch (error) {
+      $("statResult").hidden = false;
+      $("statsStatus").textContent = error.message;
+    }
+    return;
+  }
+  if (act === "export") { exportStat(data.key); return; }
+  if (act === "run") await runStat(data);
+}
+async function loadStatsContainers() {
+  const project = $("statsProject");
+  const box = $("statsContainer");
+  if (!project || !box || !project.value) return;
+  const current = box.value;
+  try {
+    const result = await api("/api/stats/containers", { method:"POST", body: new URLSearchParams({projectId: project.value}) });
+    box.innerHTML = "<option value=''>全部容器</option>" + (result.containers || []).map((item) => `<option value="${esc(item.name)}">${esc(item.name)}</option>`).join("");
+    box.value = [...box.options].some((item) => item.value === current) ? current : "";
+  } catch (error) {}
+}
+$("statsProject").onchange = () => loadStatsContainers();
+$("statsWindow").onchange = () => { $("statsCustom").hidden = $("statsWindow").value !== "custom"; };
+$("statsForm").onsubmit = async (event) => {
+  event.preventDefault();
+  const body = new FormData(event.target);
+  await runStat({
+    key: "form",
+    name: "统计结果",
+    project_id: body.get("projectId") || "",
+    time_window: body.get("window") || "15m",
+    time_from: body.get("timeFrom") || "",
+    time_to: body.get("timeTo") || "",
+    container_name: body.get("container") || "",
+    realtime: body.get("realtime") ? 1 : 0
+  });
+};
+$("exportStats").onclick = () => exportStat("form");
+
+async function runStat(data) {
+  activeStatKey = data.key;
+  document.querySelectorAll(".stat-line").forEach((row) => row.classList.toggle("active", row.dataset.key === data.key));
+  $("statResult").hidden = false;
+  $("statResultTitle").textContent = data.name || "统计结果";
+  $("statsStatus").textContent = "正在统计…";
+  const body = new URLSearchParams({projectId: data.project_id, window: data.time_window, timeFrom: data.time_from, timeTo: data.time_to, container: data.container_name});
+  if (data.realtime) body.set("realtime", "1");
+  try {
+    const result = await api("/api/api-stats", { method:"POST", body });
+    statsRows = result.rows || [];
+    statsKind = result.kind || "api";
+    statsNewMode = false;
+    slowMs = Number(result.slowMs) || 500;
+    statsSortKey = "hits";
+    statsSortDir = -1;
+    statResults[data.key] = { rows: statsRows, kind: statsKind, project_id: data.project_id, time_window: data.time_window };
+    $("statsStatus").textContent = (result.limited ? "显示请求最多的前 " + statsRows.length + " 个" : "共 " + statsRows.length + " 个") + (result.note ? "。" + result.note : "");
+    renderStats();
+  } catch (error) { $("statsStatus").textContent = error.message; }
+}
+function exportStat(key) {
+  const cached = statResults[key];
+  if (!cached || !(cached.rows || []).length) { $("statResult").hidden = false; $("statsStatus").textContent = "请先统计，再导出"; return; }
+  const previous = statsRows;
+  statsRows = cached.rows;
+  statsKind = cached.kind || "api";
+  statsNewMode = false;
+  const columns = statsColumns();
+  const lines = [columns.map((item) => item[1]).join(",")];
+  sortedStats().forEach((item) => lines.push(columns.map(([field]) => { const value = item[field] ?? ""; return /[",\n]/.test(String(value)) ? '"' + String(value).replaceAll('"', '""') + '"' : value; }).join(",")));
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(new Blob(["\ufeff" + lines.join("\n")], {type:"text/csv"}));
+  const item = statItems().find((row) => statKey(row) === key);
+  link.download = ((item && item.name) || "统计") + ".csv";
+  link.click();
+  statsRows = previous;
+}
+function openStatsRow(item) {
+  if (!item) return;
+  const meta = statResults[activeStatKey] || {};
+  document.querySelector('[data-page="trace"]').click();
+  $("traceWork").hidden = false;
+  if (meta.project_id) $("projectSelect").value = meta.project_id;
+  if (meta.time_window) $("searchWindow").value = meta.time_window;
+  const contains = (window.fieldCache || []).find((field) => field.kind === "contains");
+  fillConditions([{fieldId: contains && contains.id, keyword: item.uri || ""}]);
+  $("searchContainer").value = item.container_name || "";
+  $("drillText").value = item.uri || "";
+  $("searchForm").requestSubmit();
+}
+$("newStat").onclick = () => {
+  const first = (window.projectCache || [])[0] || {};
+  statDrafts.unshift({ key: "draft-" + (draftSeq++), draft: true, id: "", name: "", project_id: first.id || "", time_window: "15m", time_from: "", time_to: "", container_name: "", realtime: 0 });
+  renderStatRows();
+};
+
+
+async function loadSources() { const body = await api("/api/sources"); window.sourceCache = body.sources || []; $("sourceChecks").innerHTML = window.sourceCache.map((item) => `<label><input type="checkbox" name="sourceIds" value="${item.id}" style="width:auto" />${esc(item.name)}</label>`).join(""); $("sourceTable").innerHTML = "<tr><th>名称</th><th>地址</th><th></th></tr>" + window.sourceCache.map((item) => `<tr><td>${esc(item.name)}</td><td>${esc(item.base_url)}</td><td><button class="ghost" data-id="${item.id}" type="button">删除</button></td></tr>`).join(""); $("sourceTable").querySelectorAll("button").forEach((button) => button.onclick = async () => { if (!confirm("删除？")) return; await api("/api/sources/delete", { method:"POST", body: new URLSearchParams({id: button.dataset.id}) }); loadSources(); }); }
+$("sourceForm").onsubmit = async (event) => { event.preventDefault(); try { await api("/api/sources", { method:"POST", body: formBody(event.target) }); $("sourceStatus").textContent = "已添加"; loadSources(); } catch (error) { $("sourceStatus").textContent = error.message; } };
+
+let hostLoad = 0;
+function syncHosts() {
+  if ($("deployMode").value !== "host") return;
+  const boxes = [...document.querySelectorAll("#hostChecks input[data-host]")];
+  if (!boxes.length) return;
+  const picked = boxes.filter((input) => input.checked);
+  $("namespaceInput").value = picked.map((input) => input.dataset.host).join("\n");
+  const logs = [...new Set(picked.flatMap((input) => String(input.dataset.logs || "").split("\n").filter(Boolean)))];
+  $("containerValue").value = logs.join("\n");
+}
+function renderHostChoices(hosts, selected) {
+  const box = $("hostChecks");
+  box.innerHTML = "";
+  if (!hosts.length) return;
+  const multi = new Set(hosts.map((item) => item.source).filter(Boolean)).size > 1;
+  const all = document.createElement("label");
+  all.innerHTML = '<input type="checkbox" data-all="1" style="width:auto" /> 全选';
+  box.appendChild(all);
+  hosts.forEach((item) => {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.style.width = "auto";
+    input.dataset.host = item.name;
+    input.dataset.logs = (item.logs || []).join("\n");
+    input.checked = selected.has(item.name);
+    const text = document.createElement("span");
+    const logs = (item.logs || []).join("、");
+    text.textContent = item.name + (logs ? "  " + logs : "") + (multi && item.source ? "  " + item.source : "");
+    label.appendChild(input);
+    label.appendChild(text);
+    box.appendChild(label);
+  });
+  all.querySelector("input").checked = hosts.length > 0 && hosts.every((item) => selected.has(item.name));
+}
+async function loadHostChoices() {
+  const token = ++hostLoad;
+  const ids = [...document.querySelectorAll("#sourceChecks input:checked")].map((input) => input.value);
+  if (!ids.length) { $("hostChecks").innerHTML = ""; $("hostStatus").textContent = "先选择日志地址"; return; }
+  $("hostStatus").textContent = "正在读取主机…";
+  const selected = new Set(String($("namespaceInput").value || "").split(/[\s,;]+/).filter(Boolean));
+  try {
+    const result = await api("/api/hosts", { method:"POST", body: new URLSearchParams({sourceIds: ids.join(",")}) });
+    if (token !== hostLoad) return;
+    const hosts = result.hosts || [];
+    renderHostChoices(hosts, selected);
+    $("hostStatus").textContent = hosts.length ? "共 " + hosts.length + " 台" : "没有发现主机";
+  } catch (error) {
+    if (token !== hostLoad) return;
+    $("hostChecks").innerHTML = "";
+    $("hostStatus").textContent = error.message;
+  }
+}
+function updateScopeMode() {
+  const hostMode = $("deployMode").value === "host";
+  $("namespaceInput").hidden = hostMode;
+  $("hostBox").hidden = !hostMode;
+  $("scopeLabel").textContent = hostMode ? "主机和日志" : "命名空间（可多个）";
+  if (hostMode) loadHostChoices();
+  else hostLoad += 1;
+}
+function scopeText(item) {
+  if (item.deploy_mode !== "host") return item.namespace_name || "";
+  const count = String(item.namespace_name || "").split(/[\s,;]+/).filter(Boolean).length;
+  return count ? count + " 台主机" : "";
+}
+$("deployMode").onchange = updateScopeMode;
+$("sourceChecks").addEventListener("change", () => { if ($("deployMode").value === "host") loadHostChoices(); });
+$("hostChecks").addEventListener("change", (event) => {
+  if (event.target.dataset.all) document.querySelectorAll("#hostChecks input[data-host]").forEach((input) => { input.checked = event.target.checked; });
+  const boxes = [...document.querySelectorAll("#hostChecks input[data-host]")];
+  const master = document.querySelector("#hostChecks input[data-all]");
+  if (master && !event.target.dataset.all) master.checked = boxes.length > 0 && boxes.every((input) => input.checked);
+  syncHosts();
+});
+async function loadProjects() { const body = await api("/api/projects"); window.projectCache = body.projects || []; const options = window.projectCache.map((item) => `<option value="${item.id}">${esc(item.name)}</option>`).join(""); $("projectSelect").innerHTML = options; if ($("statsProject")) { $("statsProject").innerHTML = options; loadStatsContainers(); } renderStatRows(); loadProjectStats(); $("projectTable").innerHTML = "<tr><th>项目</th><th>命名空间</th><th></th></tr>" + window.projectCache.map((item) => `<tr><td>${esc(item.name)}</td><td title="${esc(item.namespace_name || "")}">${esc(scopeText(item))}</td><td><button class="ghost" data-action="edit" data-id="${item.id}" type="button">编辑</button> <button class="ghost" data-id="${item.id}" type="button">删除</button></td></tr>`).join(""); $("projectTable").querySelectorAll("button").forEach((button) => button.onclick = async () => { if (button.dataset.action !== "edit") { if (!confirm("删除项目？")) return; await api("/api/projects/delete", { method:"POST", body: new URLSearchParams({id: button.dataset.id}) }); return loadProjects(); } const item = window.projectCache.find((row) => String(row.id) === button.dataset.id); $("projectForm").hidden = false; $("projectForm").name.value = item.name; $("deployMode").value = item.deploy_mode === "host" ? "host" : "kubernetes"; $("projectForm").namespace.value = item.namespace_name || ""; $("projectForm").remark.value = item.remark || ""; $("projectForm").slowMs.value = item.slow_ms || 500; $("projectId").value = item.id; $("containerValue").value = item.containers || ""; const picked = String(item.source_ids || "").split(","); document.querySelectorAll("#sourceChecks input").forEach((input) => { input.checked = picked.includes(input.value); }); $("projectSubmit").textContent = "保存修改"; updateScopeMode(); }); }
+$("newProject").onclick = () => { $("projectForm").reset(); $("projectId").value = ""; $("containerValue").value = ""; $("projectForm").hidden = false; $("projectSubmit").textContent = "添加项目"; updateScopeMode(); };
+$("projectCancel").onclick = () => { $("projectForm").hidden = true; };
+$("projectForm").onsubmit = async (event) => { event.preventDefault(); if ($("deployMode").value === "host") syncHosts(); const body = formBody(event.target); body.set("sourceIds", [...document.querySelectorAll("#sourceChecks input:checked")].map((input) => input.value).join(",")); try { await api($("projectId").value ? "/api/projects/update" : "/api/projects", { method:"POST", body }); $("projectForm").hidden = true; loadProjects(); } catch (error) { $("projectStatus").textContent = error.message; } };
+async function loadFields() { const body = await api("/api/fields"); window.fieldCache = body.fields || []; window.fieldNames = Object.fromEntries(window.fieldCache.map((item) => [String(item.id), item.name])); window.fieldOptions = window.fieldCache.filter((item) => item.enabled).map((item) => `<option value="${item.id}">${esc(item.name)}</option>`).join(""); if (!$("conditionList").children.length) fillConditions([{}]); $("fieldTable").innerHTML = "<tr><th>名称</th><th></th></tr>" + window.fieldCache.map((item) => `<tr><td>${esc(item.name)}</td><td><button class="ghost" data-id="${item.id}" type="button">删除</button></td></tr>`).join(""); $("fieldTable").querySelectorAll("button").forEach((button) => button.onclick = async () => { await api("/api/fields/delete", { method:"POST", body: new URLSearchParams({id: button.dataset.id}) }); loadFields(); }); }
+$("fieldKind").onchange = () => { $("patternBox").hidden = $("fieldKind").value !== "template"; };
+$("fieldForm").onsubmit = async (event) => { event.preventDefault(); try { await api("/api/fields", { method:"POST", body: formBody(event.target) }); $("fieldStatus").textContent = "已保存"; loadFields(); } catch (error) { $("fieldStatus").textContent = error.message; } };
+async function loadUsers() { if (!window.isAdmin) return; const body = await api("/api/users"); window.userCache = body.users || []; $("userTable").innerHTML = "<tr><th>用户</th><th></th></tr>" + window.userCache.map((item) => `<tr><td>${esc(item.username)}</td><td><button class="ghost" data-name="${esc(item.username)}" type="button">权限</button></td></tr>`).join(""); $("userTable").querySelectorAll("button").forEach((button) => button.onclick = () => openUser(window.userCache.find((item) => item.username === button.dataset.name))); }
+async function openUser(item) { $("userForm").hidden = false; $("userEditing").value = item ? "1" : ""; $("userName").value = item ? item.username : ""; $("userName").readOnly = !!item; $("userPasswordBox").hidden = !!item; $("canCreateProject").checked = !!(item && (item.is_admin || item.can_create_project)); $("canDataSource").checked = !!(item && (item.is_admin || item.can_use_datasource)); $("canReport").checked = !!(item && (item.is_admin || item.can_use_report)); const picked = new Set(item ? String(item.project_ids || "").split(",") : []); $("grantProjects").innerHTML = (window.projectCache || []).map((project) => `<label><input type="checkbox" name="projectIds" value="${project.id}" ${picked.has(String(project.id)) ? "checked" : ""} style="width:auto" />${esc(project.name)}</label>`).join(""); try { await loadDataSources(); } catch (error) {} const pickedSources = new Set(item ? String(item.data_source_ids || "").split(",") : []); $("grantSources").innerHTML = dataSources.length ? dataSources.map((source) => `<label><input type="checkbox" name="dataSourceIds" value="${source.id}" ${pickedSources.has(String(source.id)) ? "checked" : ""} style="width:auto" />${esc(source.name)}</label>`).join("") : "<span class='meta'>还没有数据源</span>"; }
+$("openUser").onclick = () => openUser(null);
+$("openPassword").onclick = () => { $("passwordForm").hidden = false; };
+document.querySelectorAll("[data-close]").forEach((button) => button.onclick = () => { $(button.dataset.close).hidden = true; });
+$("userForm").onsubmit = async (event) => { event.preventDefault(); const body = formBody(event.target); body.set("canCreateProject", $("canCreateProject").checked ? "1" : ""); body.set("canDataSource", $("canDataSource").checked ? "1" : ""); body.set("canReport", $("canReport").checked ? "1" : ""); try { await api($("userEditing").value ? "/api/users/permissions" : "/api/users", { method:"POST", body }); $("userForm").hidden = true; loadUsers(); } catch (error) { $("userStatus").textContent = error.message; } };
+$("passwordForm").onsubmit = async (event) => { event.preventDefault(); try { await api("/api/password", { method:"POST", body: formBody(event.target) }); $("passwordForm").hidden = true; } catch (error) { $("passwordStatus").textContent = error.message; } };
+function fillHomeProjects() { const select = $("homeProject"); if (!select) return; const current = select.value; select.innerHTML = projectOptions(current); if (current) select.value = current; }
+async function openHomeIssue(item) {
+  document.querySelector('[data-page="stats"]').click();
+  await runStat({ key: "project-" + item.project_id, name: item.project_name || "统计结果", project_id: item.project_id, time_window: "1h", time_from: "", time_to: "", container_name: item.container_name || "", realtime: 0 });
+}
+$("homeSearch").onsubmit = (event) => {
+  event.preventDefault();
+  const projectId = $("homeProject").value;
+  const keyword = $("homeKeyword").value.trim();
+  const field = (window.fieldCache || []).find((item) => item.kind === $("homeKind").value && item.enabled) || (window.fieldCache || []).find((item) => item.kind === $("homeKind").value);
+  if (!projectId || !keyword) { $("homeSearchStatus").textContent = "请选择项目并输入查询值"; return; }
+  if (!field) { $("homeSearchStatus").textContent = "还没有这种查询条件"; return; }
+  $("homeSearchStatus").textContent = "";
+  document.querySelector('[data-page="trace"]').click();
+  $("traceWork").hidden = false;
+  $("linkId").value = "";
+  $("linkName").value = "";
+  $("projectSelect").value = projectId;
+  $("searchWindow").value = "1h";
+  $("customTime").hidden = true;
+  $("searchContainer").value = "";
+  $("drillText").value = "";
+  fillConditions([{ fieldId: field.id, keyword }]);
+  $("searchForm").requestSubmit();
+};
+async function loadHome() {
+  fillHomeProjects();
+  try {
+    const body = await api("/api/home");
+    const issues = body.attention || [];
+    $("homeAttention").innerHTML = issues.length ? "<table><tr><th>项目</th><th>容器</th><th>接口</th><th>失败</th><th>耗时</th></tr>" + issues.map((item) => `<tr><td>${esc(item.project_name || "")}</td><td class="uri" title="${esc(item.container_name || "")}">${esc(item.container_name || "")}</td><td class="uri" title="${esc(item.uri || "")}">${esc(item.uri || "")}</td><td class="${Number(item.errors) ? "slow" : ""}">${item.errors || 0}</td><td class="${item.max_ms != null && Number(item.max_ms) > Number(item.slow_ms || 500) ? "slow" : ""}">${item.max_ms == null ? "-" : Math.round(item.max_ms) + " ms"}</td></tr>`).join("") + "</table>" : "<p class='meta'>最近 1 小时没有报错的接口。</p>";
+    $("homeAttention").querySelectorAll("tbody tr, table tr").forEach((row, index) => { if (index) row.onclick = () => openHomeIssue(issues[index - 1]); });
+  } catch (error) {
+    const msg = "<p class='meta'>" + esc(error.message || "首页加载失败") + "</p>";
+    $("homeAttention").innerHTML = msg;
+  }
+  const reportCard = $("homeReportCard");
+  if (!window.canReport) { reportCard.hidden = true; return; }
+  reportCard.hidden = false;
+  try {
+    await loadSavedReports();
+    const reports = savedReports.slice(0, 6);
+    $("homeReports").innerHTML = reports.length ? reports.map((item) => `<div class="home-link"><b>${esc(item.name)}</b><button class="ghost" data-id="${item.id}" type="button">查看</button></div>`).join("") : "<p class='meta'>还没有报表。</p>";
+    $("homeReports").querySelectorAll("button").forEach((button) => button.onclick = async () => { document.querySelector('[data-page="reports"]').click(); await loadSavedReports(); actSavedReport(button.dataset.id, "view"); });
+  } catch (error) { $("homeReports").innerHTML = "<p class='meta'>" + esc(error.message) + "</p>"; }
+}
+async function enter(name, isAdmin, canCreate, canData, canReport) { document.body.classList.add("authed"); window.isAdmin = !!isAdmin; window.canReport = !!(isAdmin || canReport); $("who").textContent = name; $("avatar").textContent = (name || "U").slice(0,1).toUpperCase(); document.querySelectorAll("[data-admin]").forEach((el) => { el.hidden = !isAdmin; }); document.querySelectorAll("[data-data]").forEach((el) => { el.hidden = !(isAdmin || canData); }); document.querySelectorAll("[data-report]").forEach((el) => { el.hidden = !(isAdmin || canReport); }); $("newProject").hidden = !(isAdmin || canCreate); $("traceWork").hidden = true; await loadFields(); await loadSources(); await loadProjects(); await loadSavedStats(); await loadLinks(); await loadHome(); if (isAdmin) loadUsers(); }
+let dataSources = [];
+
+function fillSourceSelect(select, selected) {
+  if (!select) return;
+  select.innerHTML = "<option value=''>请选择</option>" + dataSources.map((item) => `<option value="${item.id}"${String(item.id) === String(selected) ? " selected" : ""}>${esc(item.name)}</option>`).join("");
+}
+async function loadDataSources(scope) {
+  const body = await api("/api/data-sources/list", { method:"POST", body: new URLSearchParams(scope ? {scope} : {}) });
+  dataSources = body.sources || [];
+  const table = $("dataSourceTable");
+  if (table) {
+    table.innerHTML = "<tr><th>名称</th><th>主机</th><th>数据库</th><th></th></tr>" + dataSources.map((item) => `<tr><td>${esc(item.name)}</td><td>${esc(item.host)}:${esc(item.port)}</td><td>${esc(item.database_name)}</td><td class="row-actions"><button data-act="edit" data-id="${item.id}" type="button">编辑</button><button data-act="save" data-id="${item.id}" type="button">保存</button><button data-act="test" data-id="${item.id}" type="button">测试连接</button><button class="danger" data-act="delete" data-id="${item.id}" type="button">删除</button></td></tr>`).join("");
+    table.querySelectorAll("button").forEach((button) => button.onclick = () => actDataSource(button.dataset.id, button.dataset.act));
+  }
+  fillSourceSelect($("reportSource"), $("reportSource") && $("reportSource").value);
+}
+function dataSourceFormValues() {
+  const form = $("dataSourceForm");
+  return new URLSearchParams({
+    id: $("dataSourceId").value,
+    name: form.name.value.trim(),
+    host: form.host.value.trim(),
+    port: form.port.value.trim() || "3306",
+    username: form.username.value.trim(),
+    password: form.password.value,
+    database: form.database.value.trim()
+  });
+}
+function showDataSourceForm(item) {
+  const form = $("dataSourceForm");
+  form.hidden = false;
+  if (!item) {
+    form.reset();
+    $("dataSourceId").value = "";
+    form.port.value = "3306";
+    $("dataSourceTitle").textContent = "新建数据接入";
+    $("dataSourceSubmit").textContent = "保存";
+  } else {
+    $("dataSourceId").value = item.id;
+    form.name.value = item.name;
+    form.host.value = item.host;
+    form.port.value = item.port;
+    form.username.value = item.username;
+    form.password.value = "";
+    form.database.value = item.database_name;
+    $("dataSourceTitle").textContent = "编辑数据接入";
+    $("dataSourceSubmit").textContent = "保存";
+  }
+  $("dataSourceStatus").textContent = "";
+}
+async function actDataSource(id, act) {
+  if (act === "delete") {
+    if (!confirm("删除这个数据源？")) return;
+    await api("/api/data-sources/delete", { method:"POST", body: new URLSearchParams({id}) });
+    if ($("dataSourceId").value === String(id)) $("dataSourceForm").hidden = true;
+    loadDataSources();
+    return;
+  }
+  if (act === "test") {
+    $("dataSourceStatus").textContent = "正在测试连接…";
+    try {
+      await api("/api/data-sources/test", { method:"POST", body: new URLSearchParams({id}) });
+      $("dataSourceStatus").textContent = "连接成功";
+    } catch (error) { $("dataSourceStatus").textContent = error.message; }
+    return;
+  }
+  if (act === "save") {
+    if ($("dataSourceForm").hidden || $("dataSourceId").value !== String(id)) {
+      $("dataSourceStatus").textContent = "请先编辑这一条，再保存";
+      return;
+    }
+    $("dataSourceForm").requestSubmit();
+    return;
+  }
+  const item = dataSources.find((row) => String(row.id) === String(id));
+  if (item) showDataSourceForm(item);
+}
+$("dataSourceNew").onclick = () => showDataSourceForm(null);
+$("dataSourceClose").onclick = () => { $("dataSourceForm").hidden = true; };
+$("dataSourceTest").onclick = async () => {
+  $("dataSourceStatus").textContent = "正在测试连接…";
+  try {
+    await api("/api/data-sources/test", { method:"POST", body: dataSourceFormValues() });
+    $("dataSourceStatus").textContent = "连接成功";
+  } catch (error) { $("dataSourceStatus").textContent = error.message; }
+};
+$("dataSourceForm").onsubmit = async (event) => {
+  event.preventDefault();
+  $("dataSourceStatus").textContent = "正在保存…";
+  try {
+    await api("/api/data-sources", { method:"POST", body: dataSourceFormValues() });
+    $("dataSourceStatus").textContent = "已保存";
+    $("dataSourceForm").hidden = true;
+    $("dataSourceForm").reset();
+    $("dataSourceId").value = "";
+    $("dataSourceForm").port.value = "3306";
+    loadDataSources();
+  } catch (error) { $("dataSourceStatus").textContent = error.message; }
+};
+
+let savedReports = [];
+let reportHoldSql = false;
+function reportKindText(kind) { return {bar:"柱状图", line:"折线图", table:"表格"}[kind] || "柱状图"; }
+function reportOptions(select, values, selected) {
+  select.innerHTML = "<option value=''>自动</option>" + values.map((name) => `<option value="${esc(name)}"${name === selected ? " selected" : ""}>${esc(name)}</option>`).join("");
+}
+async function loadSavedReports() {
+  const box = $("reportList");
+  try {
+    const body = await api("/api/reports/saved/list", { method:"POST", body: new URLSearchParams() });
+    savedReports = body.reports || [];
+  } catch (error) {
+    box.innerHTML = "<p class='meta'>" + esc(error.message) + "</p>";
+    return;
+  }
+  if (!savedReports.length) { box.innerHTML = "<p class='meta'>还没有报表。</p>"; return; }
+  box.innerHTML = "<table><tr><th>名称</th><th>数据源</th><th>图表</th><th>更新时间</th><th></th></tr>" + savedReports.map((item) => `<tr><td>${esc(item.name)}</td><td>${esc(item.source_name || "")}</td><td>${reportKindText(item.chart_kind)}</td><td>${esc(fmt(item.updated_at))}</td><td class="row-actions"><button data-act="view" data-id="${item.id}" type="button">查看</button><button data-act="edit" data-id="${item.id}" type="button">编辑</button><button class="danger" data-act="delete" data-id="${item.id}" type="button">删除</button></td></tr>`).join("") + "</table>";
+  box.querySelectorAll("button").forEach((button) => { button.onclick = () => actSavedReport(button.dataset.id, button.dataset.act); });
+}
+function savedReport(id) { return savedReports.find((item) => String(item.id) === String(id)); }
+async function loadReportTables() {
+  const sourceId = $("reportSource").value;
+  $("reportTable").innerHTML = "<option value=''>请选择</option>";
+  if (!sourceId) { reportOptions($("reportX"), [], ""); reportOptions($("reportY"), [], ""); return; }
+  if (!reportHoldSql) { reportOptions($("reportX"), [], ""); reportOptions($("reportY"), [], ""); }
+  $("reportStatus").textContent = "正在读取数据表…";
+  try {
+    const body = await api("/api/reports/tables", { method:"POST", body: new URLSearchParams({sourceId}) });
+    $("reportTable").innerHTML = "<option value=''>请选择</option>" + (body.tables || []).map((name) => `<option value="${esc(name)}">${esc(name)}</option>`).join("");
+    $("reportStatus").textContent = "";
+  } catch (error) { $("reportStatus").textContent = error.message; }
+}
+async function loadReportColumns() {
+  const sourceId = $("reportSource").value;
+  const table = $("reportTable").value;
+  if (!sourceId || !table) return;
+  if (!reportHoldSql) $("reportSql").value = "SELECT * FROM `" + table + "` LIMIT 100";
+  try {
+    const body = await api("/api/reports/columns", { method:"POST", body: new URLSearchParams({sourceId, table}) });
+    const names = body.columns || [];
+    const x = reportHoldSql ? $("reportX").value : (names[0] || "");
+    const y = reportHoldSql ? $("reportY").value : (names[1] || "");
+    reportOptions($("reportX"), names, x);
+    reportOptions($("reportY"), names, y);
+  } catch (error) { $("reportStatus").textContent = error.message; }
+}
+function reportPoints(columns, rows, xName, yName) {
+  const x = xName || columns[0] || "";
+  const y = yName || columns.find((name) => name !== x && rows.some((row) => Number.isFinite(Number(row[name])))) || "";
+  const grouped = new Map();
+  rows.forEach((row) => {
+    const label = String(row[x] ?? "");
+    const numeric = y && Number.isFinite(Number(row[y]));
+    const value = numeric ? Number(row[y]) : 1;
+    grouped.set(label, (grouped.get(label) || 0) + value);
+  });
+  return [...grouped.entries()].map(([label, value]) => ({label, value})).sort((a, b) => b.value - a.value);
+}
+function drawReport(kind, points) {
+  const box = $("reportChart");
+  if (kind === "table" || !points.length) { box.innerHTML = ""; box.hidden = true; return; }
+  box.hidden = false;
+  const max = Math.max(...points.map((item) => item.value), 1);
+  if (kind === "line") {
+    const width = 640, height = 220, pad = 24;
+    const step = points.length > 1 ? (width - pad * 2) / (points.length - 1) : 0;
+    const coords = points.map((item, index) => {
+      const x = pad + step * index;
+      const y = height - pad - (item.value / max) * (height - pad * 2);
+      return [x, y];
+    });
+    const line = coords.map((item) => item.join(",")).join(" ");
+    box.innerHTML = `<svg viewBox="0 0 ${width} ${height}" class="report-line"><polyline points="${line}" /></svg><div class="report-labels">${points.map((item) => `<span title="${esc(item.label)}">${esc(item.label)}</span>`).join("")}</div>`;
+    return;
+  }
+  box.innerHTML = `<div class="bars">${points.map((item) => `<div class="bar-row"><span title="${esc(item.label)}">${esc(item.label)}</span><div class="bar-track"><div class="bar-fill" style="width:${Math.max(2, item.value / max * 100)}%"></div></div><b>${esc(item.value)}</b></div>`).join("")}</div>`;
+}
+let reportResultColumns = [], reportResultRows = [], reportResultKind = "table", reportResultX = "", reportResultY = "", reportFilters = {};
+function isReasonColumn(name) { return /reason|原因/i.test(name); }
+function isDateColumn(name, rows) {
+  if (/date|日期/i.test(name)) return true;
+  const sample = rows.slice(0, 30).map((row) => String(row[name] ?? "")).filter(Boolean);
+  return sample.length > 0 && sample.every((value) => /^\d{4}-\d{2}-\d{2}/.test(value));
+}
+function uniqueColumnValues(rows, name) {
+  const values = [...new Set(rows.map((row) => String(row[name] ?? "")).filter((value) => value !== ""))];
+  return isDateColumn(name, rows) ? values.sort((a, b) => b.localeCompare(a)) : values.sort((a, b) => a.localeCompare(b, "zh"));
+}
+function filteredReportRows() {
+  return reportResultRows.filter((row) => Object.entries(reportFilters).every(([name, value]) => !value || String(row[name] ?? "") === value));
+}
+function renderReportTable() {
+  const columns = reportResultColumns;
+  const shown = filteredReportRows();
+  const head = "<tr>" + columns.map((name) => {
+    const filterable = isReasonColumn(name) || isDateColumn(name, reportResultRows);
+    if (!filterable) return `<th>${esc(name)}</th>`;
+    const options = uniqueColumnValues(reportResultRows, name).map((value) => `<option value="${esc(value)}"${reportFilters[name] === value ? " selected" : ""}>${esc(value)}</option>`).join("");
+    const label = isReasonColumn(name) ? "全部原因" : "全部日期";
+    return `<th><div>${esc(name)}</div><select data-col="${esc(name)}"><option value="">${label}</option>${options}</select></th>`;
+  }).join("") + "</tr>";
+  const body = shown.map((row) => "<tr>" + columns.map((name) => `<td>${esc(row[name] ?? "")}</td>`).join("") + "</tr>").join("");
+  $("reportData").innerHTML = columns.length ? head + body : "";
+  $("reportData").querySelectorAll("select").forEach((select) => {
+    select.onchange = () => {
+      reportFilters[select.dataset.col] = select.value;
+      const next = filteredReportRows();
+      drawReport(reportResultKind, reportPoints(columns, next, reportResultX, reportResultY));
+      renderReportTable();
+      $("reportStatus").textContent = "共 " + next.length + " 行";
+    };
+  });
+  return shown;
+}
+function showReportResult(result, kind, xName, yName) {
+  const columns = result.columns || [];
+  reportResultColumns = columns;
+  reportResultRows = result.rows || [];
+  reportResultKind = kind;
+  reportResultX = xName || $("reportX").value;
+  reportResultY = yName || $("reportY").value;
+  reportFilters = {};
+  if (!$("reportX").options.length) reportOptions($("reportX"), columns, reportResultX || columns[0] || "");
+  if (!$("reportY").options.length) reportOptions($("reportY"), columns, reportResultY || "");
+  const shown = renderReportTable();
+  drawReport(kind, reportPoints(columns, shown, reportResultX, reportResultY));
+  $("reportTableCard").hidden = !columns.length;
+  $("reportStatus").textContent = "共 " + shown.length + " 行";
+}
+async function runReportQuery(sourceId, sql, kind, xName, yName) {
+  $("reportStatus").textContent = "正在绘制…";
+  const result = await api("/api/reports/query", { method:"POST", body: new URLSearchParams({sourceId, sql}) });
+  showReportResult(result, kind, xName, yName);
+}
+function reportFormBody() {
+  return new URLSearchParams({
+    id: $("reportId").value,
+    name: $("reportName").value.trim(),
+    sourceId: $("reportSource").value,
+    table: $("reportTable").value,
+    kind: $("reportKind").value,
+    axisX: $("reportX").value,
+    axisY: $("reportY").value,
+    sql: $("reportSql").value.trim(),
+  });
+}
+async function openReportEditor(item) {
+  await loadDataSources("report");
+  $("reportForm").hidden = false;
+  $("reportId").value = item ? item.id : "";
+  $("reportEditTitle").textContent = item ? "编辑报表" : "新建报表";
+  $("reportName").value = item ? item.name : "";
+  $("reportKind").value = item ? (item.chart_kind || "bar") : "bar";
+  $("reportSource").value = item ? String(item.source_id) : "";
+  $("reportSql").value = item ? (item.sql_text || "") : "";
+  reportHoldSql = true;
+  try {
+    await loadReportTables();
+    if (item && item.table_name) $("reportTable").value = item.table_name;
+    reportOptions($("reportX"), [], item ? (item.axis_x || "") : "");
+    reportOptions($("reportY"), [], item ? (item.axis_y || "") : "");
+    if ($("reportX").options.length < 2 && item && item.axis_x) $("reportX").innerHTML += `<option value="${esc(item.axis_x)}" selected>${esc(item.axis_x)}</option>`;
+    if ($("reportY").options.length < 2 && item && item.axis_y) $("reportY").innerHTML += `<option value="${esc(item.axis_y)}" selected>${esc(item.axis_y)}</option>`;
+    await loadReportColumns();
+    if (item) {
+      $("reportSql").value = item.sql_text || "";
+      if (item.axis_x) $("reportX").value = item.axis_x;
+      if (item.axis_y) $("reportY").value = item.axis_y;
+    }
+  } finally { reportHoldSql = false; }
+  $("reportStatus").textContent = "";
+  $("reportName").focus();
+}
+async function actSavedReport(id, act) {
+  const item = savedReport(id);
+  if (!item) return;
+  if (act === "edit") return openReportEditor(item);
+  if (act === "delete") {
+    if (!confirm("删除这个报表？")) return;
+    try {
+      await api("/api/reports/saved/delete", { method:"POST", body: new URLSearchParams({id}) });
+      if ($("reportId").value === String(id)) { $("reportForm").hidden = true; $("reportId").value = ""; }
+      loadSavedReports();
+    } catch (error) { $("reportStatus").textContent = error.message; }
+    return;
+  }
+  try { await runReportQuery(item.source_id, item.sql_text, item.chart_kind || "bar", item.axis_x || "", item.axis_y || ""); }
+  catch (error) { $("reportStatus").textContent = error.message; }
+}
+$("reportSource").onchange = loadReportTables;
+$("reportTable").onchange = loadReportColumns;
+$("reportNew").onclick = () => openReportEditor(null);
+$("reportEditClose").onclick = () => { $("reportForm").hidden = true; };
+$("reportSave").onclick = async () => {
+  $("reportStatus").textContent = "正在保存…";
+  try {
+    const body = await api("/api/reports/saved", { method:"POST", body: reportFormBody() });
+    $("reportId").value = body.id || $("reportId").value;
+    $("reportForm").hidden = true;
+    $("reportStatus").textContent = "已保存";
+    loadSavedReports();
+  } catch (error) { $("reportStatus").textContent = error.message; }
+};
+$("reportForm").onsubmit = async (event) => {
+  event.preventDefault();
+  const sourceId = $("reportSource").value;
+  const table = $("reportTable").value;
+  let sql = $("reportSql").value.trim();
+  if (!sql && table) sql = "SELECT * FROM `" + table + "` LIMIT 100";
+  try { await runReportQuery(sourceId, sql, $("reportKind").value, $("reportX").value, $("reportY").value); }
+  catch (error) { $("reportStatus").textContent = error.message; }
+};
+
+let projectStatSettings = {};
+function statWindowText(value) {
+  return { "15m": "最近 15 分钟", "1h": "最近 1 小时", "6h": "最近 6 小时", "custom": "自定义" }[value] || "最近 15 分钟";
+}
+async function loadProjectStats() {
+  try {
+    const body = await api("/api/project-feishu/list", { method:"POST", body: new URLSearchParams() });
+    projectStatSettings = {};
+    (body.rows || []).forEach((row) => { projectStatSettings[String(row.project_id)] = row; });
+  } catch (error) {}
+  renderProjectStatRows();
+}
+function renderProjectStatRows() {
+  const box = $("projectStatList");
+  if (!box) return;
+  const projects = window.projectCache || [];
+  if (!projects.length) { box.innerHTML = "<p class='meta'>还没有项目。</p>"; return; }
+  box.innerHTML = projects.map((project) => {
+    const item = projectStatSettings[String(project.id)] || {};
+    const selectedWindow = item.time_window || "15m";
+    const custom = selectedWindow === "custom";
+    const windowSelect = [["15m","最近 15 分钟"],["1h","最近 1 小时"],["6h","最近 6 小时"],["custom","自定义"]].map(([value, label]) => `<option value="${value}"${value === selectedWindow ? " selected" : ""}>${label}</option>`).join("");
+    return `<div class="stat-project" data-id="${project.id}"><div class="lead"><b class="pname">${esc(project.name)}</b><select class="window">${windowSelect}</select><input class="time from" type="datetime-local" value="${esc(item.time_from || "")}"${custom ? "" : " hidden"} /><input class="time to" type="datetime-local" value="${esc(item.time_to || "")}"${custom ? "" : " hidden"} /></div><div class="tools"><select class="container"><option value="">全部容器</option></select><label class="realtime"><input type="checkbox" ${item.realtime ? "checked" : ""} />实时</label><span class="row-actions"><button class="go" data-act="run" data-id="${project.id}" type="button">统计</button><button data-act="export" data-id="${project.id}" type="button">导出</button><button data-act="edit" data-id="${project.id}" type="button">编辑</button></span></div></div>`;
+  }).join("");
+  box.querySelectorAll("button").forEach((button) => { button.onclick = () => actProjectStat(button.dataset.id, button.dataset.act); });
+  box.querySelectorAll(".window").forEach((select) => { select.onchange = () => { const line = select.closest(".stat-project"); const custom = select.value === "custom"; line.querySelector(".from").hidden = !custom; line.querySelector(".to").hidden = !custom; }; });
+  fillRowContainers();
+}
+async function fillRowContainers() {
+  const box = $("projectStatList");
+  if (!box) return;
+  for (const line of box.querySelectorAll(".stat-project")) {
+    const selected = (projectStatSettings[line.dataset.id] || {}).container_name || line.querySelector(".container").value || "";
+    try {
+      const result = await api("/api/stats/containers", { method:"POST", body: new URLSearchParams({projectId: line.dataset.id}) });
+      const select = line.querySelector(".container");
+      if (!select) continue;
+      select.innerHTML = "<option value=''>全部容器</option>" + (result.containers || []).map((item) => `<option value="${esc(item.name)}"${item.name === selected ? " selected" : ""}>${esc(item.name)}</option>`).join("");
+    } catch (error) {}
+  }
+}
+function projectStatData(id) {
+  const item = projectStatSettings[String(id)] || {};
+  const project = (window.projectCache || []).find((row) => String(row.id) === String(id));
+  const line = document.querySelector(`.stat-project[data-id="${id}"]`);
+  const container = line ? line.querySelector(".container").value : (item.container_name || "");
+  const realtime = line ? line.querySelector(".realtime input").checked : !!item.realtime;
+  const timeWindow = line ? line.querySelector(".window").value : (item.time_window || "15m");
+  const timeFrom = line ? line.querySelector(".from").value : (item.time_from || "");
+  const timeTo = line ? line.querySelector(".to").value : (item.time_to || "");
+  return { key: "project-" + id, name: project ? project.name : "统计结果", project_id: id, time_window: timeWindow, time_from: timeFrom, time_to: timeTo, container_name: container, realtime: realtime ? 1 : 0 };
+}
+async function actProjectStat(id, act) {
+  if (act === "edit") return editProjectStat(id);
+  if (act === "export") return exportStat("project-" + id);
+  await runStat(projectStatData(id));
+}
+async function editProjectStat(id) {
+  const project = (window.projectCache || []).find((row) => String(row.id) === String(id));
+  const saved = projectStatSettings[String(id)] || {};
+  $("statsEditor").hidden = false;
+  $("statsEditTitle").textContent = project ? project.name : "编辑";
+  $("statsEditor").dataset.projectId = id;
+  $("statsProject").value = id;
+  $("statsWindow").value = saved.time_window || "15m";
+  $("statsCustom").hidden = $("statsWindow").value !== "custom";
+  $("statsForm").timeFrom.value = saved.time_from || "";
+  $("statsForm").timeTo.value = saved.time_to || "";
+  if ($("statsForm").realtime) $("statsForm").realtime.checked = !!saved.realtime;
+  await loadStatsContainers();
+  if ($("statsContainer")) $("statsContainer").value = saved.container_name || "";
+  if ($("feishuWebhook")) {
+    $("feishuWebhook").value = saved.webhook || "";
+    $("feishuTime").value = saved.time || "09:00";
+    $("feishuEnabled").checked = !!saved.enabled;
+    $("feishuStatus").textContent = saved.lastSentOn ? "最近发送 " + saved.lastSentOn : "";
+  }
+}
+function editorStatBody() {
+  const form = $("statsForm");
+  return {
+    projectId: $("statsEditor").dataset.projectId || $("statsProject").value,
+    window: $("statsWindow").value,
+    timeFrom: form.timeFrom.value,
+    timeTo: form.timeTo.value,
+    container: $("statsContainer").value,
+    realtime: form.realtime && form.realtime.checked ? "1" : "",
+    webhook: $("feishuWebhook") ? $("feishuWebhook").value.trim() : "",
+    time: $("feishuTime") ? $("feishuTime").value : "09:00",
+    enabled: $("feishuEnabled") && $("feishuEnabled").checked ? "1" : ""
+  };
+}
+$("statsEditClose").onclick = () => { $("statsEditor").hidden = true; };
+$("feishuSave").onclick = async () => {
+  $("feishuStatus").textContent = "正在保存…";
+  try {
+    await api("/api/project-feishu", { method:"POST", body: new URLSearchParams(editorStatBody()) });
+    $("feishuStatus").textContent = "已保存";
+    $("statsEditor").hidden = true;
+    await loadProjectStats();
+  } catch (error) { $("feishuStatus").textContent = error.message; }
+};
+$("feishuSend").onclick = async () => {
+  $("feishuStatus").textContent = "正在发送…";
+  try {
+    await api("/api/feishu-report/send", { method:"POST", body: new URLSearchParams({projectId: editorStatBody().projectId}) });
+    $("feishuStatus").textContent = "已发送";
+  } catch (error) { $("feishuStatus").textContent = error.message; }
+};
+
+fetch("/api/me").then(async (res) => { if (res.ok) { const me = await res.json(); enter(me.username, me.isAdmin, me.canCreateProject, me.canDataSource, me.canReport); } });
+</script></body></html>
