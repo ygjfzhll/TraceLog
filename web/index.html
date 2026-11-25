@@ -41,6 +41,7 @@ body:not(.authed) .shell { display:none; }
 .row.active, .row:hover { background:#f8fafc; }
 .filters { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
 .filters input { width:140px; }
+.filters [hidden] { display:none !important; }
 .brief pre, .step .raw { white-space:pre-wrap; background:#f8fafc; border-radius:8px; padding:10px 12px; }
 .step .raw { display:none; max-height:220px; overflow:auto; }
 .step.open .raw { display:block; }
@@ -184,7 +185,7 @@ h2 { font-size:15px; margin:0 0 12px; font-weight:650; }
 <div id="customTime" hidden><label>开始</label><input name="timeFrom" type="datetime-local" /><label>结束</label><input name="timeTo" type="datetime-local" /></div>
 <div class="actions"><button class="primary" type="submit">查看</button><button class="ghost" id="saveLink" type="button">保存</button></div>
 <p class="meta" id="searchStatus"></p></form>
-<div class="card"><div class="filters"><input id="filterUri" placeholder="接口" /><input id="filterService" placeholder="服务" /><label style="margin:0"><input id="filterFail" type="checkbox" style="width:auto" /> 只看失败</label><button class="ghost" id="exportTrace" type="button">导出文本</button></div>
+<div class="card"><div class="filters"><input id="filterUri" placeholder="接口" hidden /><input id="filterService" placeholder="服务" hidden /><label hidden style="margin:0"><input id="filterFail" type="checkbox" style="width:auto" /> 只看失败</label><button class="ghost" id="exportTrace" type="button">导出文本</button></div>
 <div style="display:grid;grid-template-columns:280px 1fr;gap:12px"><div id="requestList" class="meta">查看一条链路后，这里列出请求。</div><div id="eventList"></div></div></div></div></section>
 <section class="page" id="page-stats"><div class="top"><h1>接口请求统计</h1><button class="primary" id="newStat" type="button">新增接口请求统计</button></div>
 <div class="card" id="projectStatList"></div>
