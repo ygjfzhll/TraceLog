@@ -215,3 +215,17 @@ WHERE NOT EXISTS (SELECT 1 FROM search_fields WHERE kind = 'log_id');
 
 INSERT IGNORE INTO feishu_slow_report (id, webhook, enabled, send_hour, send_minute)
 VALUES (1, '', 0, 9, 0);
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+  id BIGINT PRIMARY KEY AUTO_INCREMENT,
+  username VARCHAR(64) NOT NULL,
+  action VARCHAR(80) NOT NULL,
+  method VARCHAR(8) NOT NULL,
+  path VARCHAR(191) NOT NULL,
+  detail VARCHAR(1000) NOT NULL DEFAULT '',
+  success TINYINT NOT NULL DEFAULT 1,
+  ip VARCHAR(64) NOT NULL DEFAULT '',
+  created_at DATETIME NOT NULL,
+  KEY idx_audit_time (created_at),
+  KEY idx_audit_user (username)
+);

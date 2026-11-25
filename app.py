@@ -224,6 +224,27 @@ def init_db():
                         ("日志 ID", "log_id", "", order, datetime.now()),
                     )
             ensure_anonymous_account(cur)
+            ensure_audit_logs(cur)
+
+
+def ensure_audit_logs(cur):
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_logs (
+          id BIGINT PRIMARY KEY AUTO_INCREMENT,
+          username VARCHAR(64) NOT NULL,
+          action VARCHAR(80) NOT NULL,
+          method VARCHAR(8) NOT NULL,
+          path VARCHAR(191) NOT NULL,
+          detail VARCHAR(1000) NOT NULL DEFAULT '',
+          success TINYINT NOT NULL DEFAULT 1,
+          ip VARCHAR(64) NOT NULL DEFAULT '',
+          created_at DATETIME NOT NULL,
+          KEY idx_audit_time (created_at),
+          KEY idx_audit_user (username)
+        )
+        """
+    )
 
 
 def ensure_anonymous_account(cur):
@@ -1353,6 +1374,8 @@ def Handler_do_POST(self):
     _limits.flags = {"seedLimited": False, "requestLimited": False, "chainLimited": False, "focused": False, "seedCap": SEED_LIMIT}
     _limits.trace_ids = []
     path = urlparse(self.path).path
+    if path == "/api/audit/list":
+        return handle_audit_list(self)
     if path == "/api/login/anonymous":
         return handle_anonymous_login(self)
     if path == "/api/new-api-stats":
@@ -1403,6 +1426,205 @@ def Handler_do_POST(self):
 
 
 Handler.do_POST = Handler_do_POST
+
+
+_orig_read_form = read_form
+
+
+def read_form(handler):
+    form = _orig_read_form(handler)
+    handler._audit_form = form
+    return form
+
+
+_AUDIT_SECRET = ("password", "oldpassword", "newpassword", "webhook")
+_AUDIT_ACTIONS = {
+    ("POST", "/api/login"): "登录",
+    ("POST", "/api/login/anonymous"): "匿名登录",
+    ("POST", "/api/logout"): "退出",
+    ("POST", "/api/password"): "修改密码",
+    ("POST", "/api/search"): "查询链路",
+    ("POST", "/api/projects"): "新建项目",
+    ("POST", "/api/projects/update"): "修改项目",
+    ("POST", "/api/projects/delete"): "删除项目",
+    ("GET", "/api/projects"): "查看项目",
+    ("POST", "/api/links"): "保存链路",
+    ("POST", "/api/links/delete"): "删除链路",
+    ("GET", "/api/links"): "查看链路",
+    ("POST", "/api/api-stats"): "查询接口统计",
+    ("POST", "/api/stats/containers"): "查看容器",
+    ("GET", "/api/namespaces/containers"): "按命名空间查看容器",
+    ("POST", "/api/sources"): "添加日志接入",
+    ("POST", "/api/sources/delete"): "删除日志接入",
+    ("GET", "/api/sources"): "查看日志接入",
+    ("POST", "/api/fields"): "添加查询条件",
+    ("POST", "/api/fields/delete"): "删除查询条件",
+    ("GET", "/api/fields"): "查看查询条件",
+    ("POST", "/api/users"): "添加用户",
+    ("GET", "/api/users"): "查看用户",
+    ("POST", "/api/users/permissions"): "修改用户权限",
+    ("POST", "/api/data-sources"): "保存数据接入",
+    ("POST", "/api/data-sources/delete"): "删除数据接入",
+    ("POST", "/api/data-sources/test"): "测试数据接入",
+    ("POST", "/api/data-sources/list"): "查看数据接入",
+    ("POST", "/api/reports/query"): "绘制报表",
+    ("POST", "/api/reports/saved"): "保存报表",
+    ("POST", "/api/reports/saved/delete"): "删除报表",
+    ("POST", "/api/reports/saved/list"): "查看报表",
+    ("POST", "/api/reports/tables"): "查看报表数据表",
+    ("POST", "/api/reports/columns"): "查看报表字段",
+    ("POST", "/api/saved-stats"): "保存统计",
+    ("POST", "/api/saved-stats/delete"): "删除统计",
+    ("POST", "/api/saved-stats/list"): "查看统计",
+    ("POST", "/api/feishu-report"): "保存飞书设置",
+    ("POST", "/api/feishu-report/send"): "发送飞书报表",
+    ("POST", "/api/feishu-report/get"): "查看飞书设置",
+    ("POST", "/api/project-feishu"): "保存项目飞书设置",
+    ("POST", "/api/project-feishu/list"): "查看项目飞书设置",
+    ("POST", "/api/hosts"): "查看主机",
+    ("POST", "/api/new-api-stats"): "查询新增接口",
+    ("GET", "/api/home"): "查看首页",
+    ("POST", "/api/audit/list"): "查看操作审计",
+}
+
+
+def audit_action(method, path):
+    return _AUDIT_ACTIONS.get((method, path), path.replace("/api/", "") or path)
+
+
+def audit_detail(handler):
+    form = getattr(handler, "_audit_form", None) or {}
+    query = parse_qs(urlparse(handler.path).query)
+    parts = []
+    items = []
+    if hasattr(form, "items"):
+        items.extend(form.items())
+    for key, values in query.items():
+        items.append((key, values[0] if isinstance(values, list) and values else values))
+    for key, value in items:
+        name = str(key or "")
+        if name.lower() in _AUDIT_SECRET or "password" in name.lower():
+            continue
+        text = str(value or "").replace("\n", " ").strip()
+        if not text:
+            continue
+        parts.append("%s=%s" % (name, text[:160]))
+    return "；".join(parts)[:1000]
+
+
+def audit_username(handler, path):
+    form = getattr(handler, "_audit_form", None) or {}
+    if path == "/api/login/anonymous":
+        return "anonymous"
+    if path == "/api/login":
+        return (form.get("username") if hasattr(form, "get") else "") or "未知"
+    try:
+        name = current_username(handler)
+    except Exception:
+        name = ""
+    return name or "未登录"
+
+
+def write_audit(handler, path, state):
+    method = getattr(handler, "command", "POST") or "POST"
+    address = ""
+    if getattr(handler, "client_address", None):
+        address = str(handler.client_address[0] or "")
+    with connect() as conn:
+        with conn.cursor() as cur:
+            ensure_audit_logs(cur)
+            cur.execute(
+                """
+                INSERT INTO audit_logs (username, action, method, path, detail, success, ip, created_at)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                """,
+                (
+                    audit_username(handler, path)[:64],
+                    audit_action(method, path)[:80],
+                    method[:8],
+                    path[:191],
+                    audit_detail(handler),
+                    1 if int(state.get("code") or 200) < 400 and not state.get("error") else 0,
+                    address[:64],
+                    datetime.now(),
+                ),
+            )
+
+
+def run_audited(handler, method):
+    path = urlparse(handler.path).path.split("?")[0]
+    if not path.startswith("/api/") or path == "/api/me":
+        return method(handler)
+    state = {"code": 200, "error": ""}
+    original_json = handler._json
+
+    def wrapped_json(code, payload, extra=None):
+        state["code"] = int(code or 200)
+        if isinstance(payload, dict) and payload.get("error"):
+            state["error"] = str(payload.get("error"))[:180]
+        if extra is None:
+            return original_json(code, payload)
+        return original_json(code, payload, extra)
+
+    handler._json = wrapped_json
+    try:
+        return method(handler)
+    except Exception as exc:
+        state["code"] = 500
+        state["error"] = str(exc)[:180]
+        raise
+    finally:
+        handler._json = original_json
+        try:
+            write_audit(handler, path, state)
+        except Exception:
+            pass
+
+
+def handle_audit_list(self):
+    form = read_form(self)
+    user = self._user()
+    if not user:
+        return
+    try:
+        require_admin(user)
+        username = (form.get("username") or "").strip()
+        action = (form.get("action") or "").strip()
+        sql = "SELECT id, username, action, detail, success, ip, created_at FROM audit_logs WHERE 1=1"
+        args = []
+        if username:
+            sql += " AND username=%s"
+            args.append(username)
+        if action:
+            sql += " AND action LIKE %s"
+            args.append("%" + action + "%")
+        sql += " ORDER BY id DESC LIMIT 500"
+        with connect() as conn:
+            with conn.cursor() as cur:
+                ensure_audit_logs(cur)
+                cur.execute(sql, tuple(args))
+                rows = []
+                for item in cur.fetchall():
+                    created = item.get("created_at")
+                    item["created_at"] = created.strftime("%Y-%m-%d %H:%M:%S") if created else ""
+                    item["success"] = int(item.get("success") or 0)
+                    rows.append(item)
+        self._json(200, {"rows": rows, "limited": len(rows) >= 500})
+    except ValueError as exc:
+        self._json(400, {"error": str(exc)})
+    except Exception as exc:
+        self._json(400, {"error": str(exc)[:180]})
+
+
+_plain_post = Handler_do_POST
+
+
+def Handler_do_POST(self):
+    return run_audited(self, _plain_post)
+
+
+Handler.do_POST = Handler_do_POST
+
 
 
 def query_logs(source, conditions, window, namespace_name, time_from="", time_to="", limit=SEED_LIMIT, deploy_mode="kubernetes", containers=""):
@@ -1598,6 +1820,15 @@ def Handler_do_GET(self):
     if path == "/api/users":
         return handle_users_get(self)
     return _orig_do_get(self)
+
+
+Handler.do_GET = Handler_do_GET
+
+_plain_get = Handler_do_GET
+
+
+def Handler_do_GET(self):
+    return run_audited(self, _plain_get)
 
 
 Handler.do_GET = Handler_do_GET

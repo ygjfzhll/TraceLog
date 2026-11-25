@@ -42,6 +42,7 @@ body:not(.authed) .shell { display:none; }
 .filters { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
 .filters input { width:140px; }
 .filters [hidden] { display:none !important; }
+#auditTable td { max-width:420px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .brief pre, .step .raw { white-space:pre-wrap; background:#f8fafc; border-radius:8px; padding:10px 12px; }
 .step .raw { display:none; max-height:220px; overflow:auto; }
 .step.open .raw { display:block; }
@@ -164,6 +165,7 @@ h2 { font-size:15px; margin:0 0 12px; font-weight:650; }
 <button type="button" data-page="sources" data-admin="1">日志接入</button>
 <button type="button" data-page="fields" data-admin="1">查询条件</button>
 <button type="button" data-page="users" data-admin="1">用户管理</button>
+<button type="button" data-page="audit" data-admin="1">操作审计</button>
 </nav><div class="side-foot"><span class="avatar" id="avatar">A</span><span id="who"></span><button id="logout" type="button">退出</button></div></aside>
 <main>
 
@@ -245,6 +247,9 @@ h2 { font-size:15px; margin:0 0 12px; font-weight:650; }
 <div class="actions"><button class="primary" type="submit">保存</button><button class="ghost" type="button" data-close="passwordForm">取消</button></div>
 <p class="meta" id="passwordStatus"></p></div></form></section>
 
+<section class="page" id="page-audit"><div class="top"><h1>操作审计</h1></div>
+<div class="card"><div class="filters"><input id="auditUser" placeholder="用户" /><input id="auditAction" placeholder="操作" /><button class="ghost" id="auditSearch" type="button">查询</button></div>
+<p class="meta" id="auditStatus"></p><div style="overflow:auto"><table id="auditTable"></table></div></div></section>
 <section class="page" id="page-datasources"><div class="top"><h1>数据接入</h1><button class="primary" id="dataSourceNew" type="button">新建数据接入</button></div>
 <div class="card"><table id="dataSourceTable"></table></div>
 <form class="card" id="dataSourceForm" hidden style="margin-top:14px"><div class="top"><h2 id="dataSourceTitle">新建数据接入</h2><button class="ghost" id="dataSourceClose" type="button">收起</button></div><input type="hidden" id="dataSourceId" />
@@ -285,7 +290,7 @@ function formBody(form) { return new URLSearchParams(new FormData(form)); }
 async function api(url, options) { const res = await fetch(url, options); const body = await res.json().catch(() => ({})); if (!res.ok) throw new Error(body.error || "请求失败"); return body; }
 function esc(value) { return String(value ?? "").replace(/[&<>"]/g, (ch) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[ch])); }
 function fmt(value) { return value ? String(value).replace("T"," ").slice(0,19) : ""; }
-document.querySelectorAll(".nav button").forEach((button) => { button.onclick = () => { document.querySelectorAll(".nav button").forEach((item) => item.classList.remove("active")); button.classList.add("active"); document.querySelectorAll(".page").forEach((page) => page.classList.remove("show")); $("page-" + button.dataset.page).classList.add("show"); if (button.dataset.page === "trace") $("traceWork").hidden = true; if (button.dataset.page === "stats") loadSavedStats(); if (button.dataset.page === "datasources") loadDataSources(); if (button.dataset.page === "home") loadHome(); if (button.dataset.page === "reports") { loadDataSources("report"); loadSavedReports(); } if (button.dataset.page === "stats") loadProjectStats(); }; });
+document.querySelectorAll(".nav button").forEach((button) => { button.onclick = () => { document.querySelectorAll(".nav button").forEach((item) => item.classList.remove("active")); button.classList.add("active"); document.querySelectorAll(".page").forEach((page) => page.classList.remove("show")); $("page-" + button.dataset.page).classList.add("show"); if (button.dataset.page === "trace") $("traceWork").hidden = true; if (button.dataset.page === "stats") loadSavedStats(); if (button.dataset.page === "datasources") loadDataSources(); if (button.dataset.page === "home") loadHome(); if (button.dataset.page === "reports") { loadDataSources("report"); loadSavedReports(); } if (button.dataset.page === "stats") loadProjectStats(); if (button.dataset.page === "audit") loadAudit(); }; });
 $("loginForm").onsubmit = async (event) => { event.preventDefault(); try { await api("/api/login", { method:"POST", body: formBody(event.target) }); const me = await api("/api/me"); enter(me.username, me.isAdmin, me.canCreateProject, me.canDataSource, me.canReport); } catch (error) { $("loginStatus").textContent = error.message; } };
 $("anonymousLogin").onclick = async () => { $("loginStatus").textContent = ""; try { await api("/api/login/anonymous", { method:"POST" }); const me = await api("/api/me"); enter(me.username, me.isAdmin, me.canCreateProject, me.canDataSource, me.canReport); } catch (error) { $("loginStatus").textContent = error.message; } };
 $("logout").onclick = async () => { await fetch("/api/logout", { method:"POST" }); location.reload(); };
@@ -715,6 +720,18 @@ async function loadProjects() { const body = await api("/api/projects"); window.
 $("newProject").onclick = () => { $("projectForm").reset(); $("projectId").value = ""; $("containerValue").value = ""; renderNamespaceContainers([]); $("namespaceContainerStatus").textContent = ""; $("projectForm").hidden = false; $("projectSubmit").textContent = "添加项目"; updateScopeMode(); };
 $("projectCancel").onclick = () => { $("projectForm").hidden = true; };
 $("projectForm").onsubmit = async (event) => { event.preventDefault(); if ($("deployMode").value === "host") syncHosts(); const body = formBody(event.target); body.set("sourceIds", [...document.querySelectorAll("#sourceChecks input:checked")].map((input) => input.value).join(",")); try { await api($("projectId").value ? "/api/projects/update" : "/api/projects", { method:"POST", body }); $("projectForm").hidden = true; loadProjects(); } catch (error) { $("projectStatus").textContent = error.message; } };
+
+async function loadAudit() {
+  const box = $("auditTable");
+  $("auditStatus").textContent = "正在加载…";
+  try {
+    const body = await api("/api/audit/list", { method:"POST", body: new URLSearchParams({ username: $("auditUser").value.trim(), action: $("auditAction").value.trim() }) });
+    const rows = body.rows || [];
+    box.innerHTML = rows.length ? "<tr><th>时间</th><th>用户</th><th>操作</th><th>结果</th><th>内容</th><th>地址</th></tr>" + rows.map((item) => `<tr><td>${esc(fmt(item.created_at))}</td><td>${esc(item.username || "")}</td><td>${esc(item.action || "")}</td><td class="${item.success ? "" : "slow"}">${item.success ? "成功" : "失败"}</td><td title="${esc(item.detail || "")}">${esc(item.detail || "")}</td><td>${esc(item.ip || "")}</td></tr>`).join("") : "";
+    $("auditStatus").textContent = rows.length ? (body.limited ? "最近 500 条" : "共 " + rows.length + " 条") : "还没有操作记录";
+  } catch (error) { $("auditStatus").textContent = error.message; }
+}
+$("auditSearch").onclick = loadAudit;
 async function loadFields() { const body = await api("/api/fields"); window.fieldCache = body.fields || []; window.fieldNames = Object.fromEntries(window.fieldCache.map((item) => [String(item.id), item.name])); window.fieldOptions = window.fieldCache.filter((item) => item.enabled).map((item) => `<option value="${item.id}">${esc(item.name)}</option>`).join(""); if (!$("conditionList").children.length) fillConditions([{}]); $("fieldTable").innerHTML = "<tr><th>名称</th><th></th></tr>" + window.fieldCache.map((item) => `<tr><td>${esc(item.name)}</td><td><button class="ghost" data-id="${item.id}" type="button">删除</button></td></tr>`).join(""); $("fieldTable").querySelectorAll("button").forEach((button) => button.onclick = async () => { await api("/api/fields/delete", { method:"POST", body: new URLSearchParams({id: button.dataset.id}) }); loadFields(); }); }
 $("fieldKind").onchange = () => { $("patternBox").hidden = $("fieldKind").value !== "template"; };
 $("fieldForm").onsubmit = async (event) => { event.preventDefault(); try { await api("/api/fields", { method:"POST", body: formBody(event.target) }); $("fieldStatus").textContent = "已保存"; loadFields(); } catch (error) { $("fieldStatus").textContent = error.message; } };
