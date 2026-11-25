@@ -50,7 +50,8 @@ body:not(.authed) .shell { display:none; }
 .span-2 { grid-column:1 / -1; }
 .checks { display:flex; flex-wrap:wrap; gap:8px; }
 .checks label { margin:0; color:var(--ink); background:#f8fafc; border:1px solid var(--line); border-radius:8px; padding:6px 10px; }
-#hostBox[hidden] { display:none !important; }
+#hostBox[hidden], #namespaceContainerBox[hidden] { display:none !important; }
+#namespaceContainers { margin-top:8px; max-height:180px; overflow:auto; }
 #hostChecks { flex-direction:column; align-items:stretch; max-height:240px; overflow:auto; }
 #hostChecks label { justify-content:flex-start; gap:8px; }
 .modal { position:fixed; inset:0; background:rgba(16,24,40,.45); display:flex; justify-content:center; padding:8vh 16px; }
@@ -207,7 +208,7 @@ h2 { font-size:15px; margin:0 0 12px; font-weight:650; }
 <div><label>项目名称</label><input name="name" required /></div>
 <div class="span-2"><label>日志地址</label><div class="checks" id="sourceChecks"></div></div>
 <div><label>运行方式</label><select name="deployMode" id="deployMode"><option value="kubernetes">Kubernetes</option><option value="host">主机</option></select></div>
-<div class="span-2" id="scopeBox"><label id="scopeLabel">命名空间（可多个）</label><textarea name="namespace" id="namespaceInput" rows="3"></textarea><div id="hostBox" hidden><div class="checks" id="hostChecks"></div><p class="meta" id="hostStatus"></p></div></div>
+<div class="span-2" id="scopeBox"><label id="scopeLabel">命名空间（可多个）</label><textarea name="namespace" id="namespaceInput" rows="3"></textarea><div id="namespaceContainerBox"><button class="ghost" id="loadNamespaceContainers" type="button" style="margin-top:8px">根据命名空间添加容器</button><div class="checks" id="namespaceContainers"></div><p class="meta" id="namespaceContainerStatus"></p></div><div id="hostBox" hidden><div class="checks" id="hostChecks"></div><p class="meta" id="hostStatus"></p></div></div>
 <div><label>说明</label><input name="remark" /></div>
 <div><label>慢接口阈值（毫秒）</label><input name="slowMs" type="number" value="500" /></div>
 </div><input type="hidden" name="id" id="projectId" /><input type="hidden" name="containers" id="containerValue" />
@@ -598,6 +599,40 @@ $("newStat").onclick = () => {
 async function loadSources() { const body = await api("/api/sources"); window.sourceCache = body.sources || []; $("sourceChecks").innerHTML = window.sourceCache.map((item) => `<label><input type="checkbox" name="sourceIds" value="${item.id}" style="width:auto" />${esc(item.name)}</label>`).join(""); $("sourceTable").innerHTML = "<tr><th>名称</th><th>地址</th><th>Account ID</th><th>Project ID</th><th></th></tr>" + window.sourceCache.map((item) => `<tr><td>${esc(item.name)}</td><td>${esc(item.base_url)}</td><td>${esc(item.account_id || "")}</td><td>${esc(item.project_id || "")}</td><td><button class="ghost" data-id="${item.id}" type="button">删除</button></td></tr>`).join(""); $("sourceTable").querySelectorAll("button").forEach((button) => button.onclick = async () => { if (!confirm("删除？")) return; await api("/api/sources/delete", { method:"POST", body: new URLSearchParams({id: button.dataset.id}) }); loadSources(); }); }
 $("sourceForm").onsubmit = async (event) => { event.preventDefault(); try { await api("/api/sources", { method:"POST", body: formBody(event.target) }); $("sourceStatus").textContent = "已添加"; loadSources(); } catch (error) { $("sourceStatus").textContent = error.message; } };
 
+
+function namespaceContainerSelection() {
+  return new Set(String($("containerValue").value || "").split(/[\s,;]+/).filter(Boolean));
+}
+function syncNamespaceContainers() {
+  $("containerValue").value = [...document.querySelectorAll("#namespaceContainers input:checked")].map((input) => input.value).join("\n");
+}
+function renderNamespaceContainers(names) {
+  const box = $("namespaceContainers");
+  const selected = namespaceContainerSelection();
+  const list = [...new Set((names || []).filter(Boolean))];
+  selected.forEach((name) => { if (!list.includes(name)) list.push(name); });
+  box.innerHTML = list.map((name) => `<label><input type="checkbox" value="${esc(name)}" ${selected.has(name) ? "checked" : ""} style="width:auto" />${esc(name)}</label>`).join("");
+  box.querySelectorAll("input").forEach((input) => { input.onchange = syncNamespaceContainers; });
+}
+async function loadNamespaceContainers() {
+  const projectId = $("projectId").value;
+  const names = String($("namespaceInput").value || "").split(/[\s,;]+/).filter(Boolean);
+  if (!projectId) { $("namespaceContainerStatus").textContent = "请先保存项目，再添加容器"; return; }
+  if (!names.length) { $("namespaceContainerStatus").textContent = "请先填写命名空间"; return; }
+  $("namespaceContainerStatus").textContent = "正在读取容器…";
+  try {
+    const found = [];
+    for (const name of names) {
+      const body = await api("/api/namespaces/containers?" + new URLSearchParams({projectId, name}));
+      (body.containers || []).forEach((item) => {
+        const container = String(item && item.name || item || "").trim();
+        if (container && !found.includes(container)) found.push(container);
+      });
+    }
+    renderNamespaceContainers(found);
+    $("namespaceContainerStatus").textContent = found.length ? "已读取 " + found.length + " 个容器" : "这些命名空间下没有容器";
+  } catch (error) { $("namespaceContainerStatus").textContent = error.message; }
+}
 let hostLoad = 0;
 function syncHosts() {
   if ($("deployMode").value !== "host") return;
@@ -656,6 +691,7 @@ function updateScopeMode() {
   $("namespaceInput").hidden = hostMode;
   $("hostBox").hidden = !hostMode;
   $("scopeLabel").textContent = hostMode ? "主机和日志" : "命名空间（可多个）";
+  if ($("namespaceContainerBox")) $("namespaceContainerBox").hidden = hostMode;
   if (hostMode) loadHostChoices();
   else hostLoad += 1;
 }
@@ -665,6 +701,7 @@ function scopeText(item) {
   return count ? count + " 台主机" : "";
 }
 $("deployMode").onchange = updateScopeMode;
+$("loadNamespaceContainers").onclick = loadNamespaceContainers;
 $("sourceChecks").addEventListener("change", () => { if ($("deployMode").value === "host") loadHostChoices(); });
 $("hostChecks").addEventListener("change", (event) => {
   if (event.target.dataset.all) document.querySelectorAll("#hostChecks input[data-host]").forEach((input) => { input.checked = event.target.checked; });
@@ -673,8 +710,8 @@ $("hostChecks").addEventListener("change", (event) => {
   if (master && !event.target.dataset.all) master.checked = boxes.length > 0 && boxes.every((input) => input.checked);
   syncHosts();
 });
-async function loadProjects() { const body = await api("/api/projects"); window.projectCache = body.projects || []; const options = window.projectCache.map((item) => `<option value="${item.id}">${esc(item.name)}</option>`).join(""); $("projectSelect").innerHTML = options; if ($("statsProject")) { $("statsProject").innerHTML = options; loadStatsContainers(); } renderStatRows(); loadProjectStats(); $("projectTable").innerHTML = "<tr><th>项目</th><th>命名空间</th><th></th></tr>" + window.projectCache.map((item) => `<tr><td>${esc(item.name)}</td><td title="${esc(item.namespace_name || "")}">${esc(scopeText(item))}</td><td><button class="ghost" data-action="edit" data-id="${item.id}" type="button">编辑</button> <button class="ghost" data-id="${item.id}" type="button">删除</button></td></tr>`).join(""); $("projectTable").querySelectorAll("button").forEach((button) => button.onclick = async () => { if (button.dataset.action !== "edit") { if (!confirm("删除项目？")) return; await api("/api/projects/delete", { method:"POST", body: new URLSearchParams({id: button.dataset.id}) }); return loadProjects(); } const item = window.projectCache.find((row) => String(row.id) === button.dataset.id); $("projectForm").hidden = false; $("projectForm").name.value = item.name; $("deployMode").value = item.deploy_mode === "host" ? "host" : "kubernetes"; $("projectForm").namespace.value = item.namespace_name || ""; $("projectForm").remark.value = item.remark || ""; $("projectForm").slowMs.value = item.slow_ms || 500; $("projectId").value = item.id; $("containerValue").value = item.containers || ""; const picked = String(item.source_ids || "").split(","); document.querySelectorAll("#sourceChecks input").forEach((input) => { input.checked = picked.includes(input.value); }); $("projectSubmit").textContent = "保存修改"; updateScopeMode(); }); }
-$("newProject").onclick = () => { $("projectForm").reset(); $("projectId").value = ""; $("containerValue").value = ""; $("projectForm").hidden = false; $("projectSubmit").textContent = "添加项目"; updateScopeMode(); };
+async function loadProjects() { const body = await api("/api/projects"); window.projectCache = body.projects || []; const options = window.projectCache.map((item) => `<option value="${item.id}">${esc(item.name)}</option>`).join(""); $("projectSelect").innerHTML = options; if ($("statsProject")) { $("statsProject").innerHTML = options; loadStatsContainers(); } renderStatRows(); loadProjectStats(); $("projectTable").innerHTML = "<tr><th>项目</th><th>命名空间</th><th></th></tr>" + window.projectCache.map((item) => `<tr><td>${esc(item.name)}</td><td title="${esc(item.namespace_name || "")}">${esc(scopeText(item))}</td><td><button class="ghost" data-action="edit" data-id="${item.id}" type="button">编辑</button> <button class="ghost" data-id="${item.id}" type="button">删除</button></td></tr>`).join(""); $("projectTable").querySelectorAll("button").forEach((button) => button.onclick = async () => { if (button.dataset.action !== "edit") { if (!confirm("删除项目？")) return; await api("/api/projects/delete", { method:"POST", body: new URLSearchParams({id: button.dataset.id}) }); return loadProjects(); } const item = window.projectCache.find((row) => String(row.id) === button.dataset.id); $("projectForm").hidden = false; $("projectForm").name.value = item.name; $("deployMode").value = item.deploy_mode === "host" ? "host" : "kubernetes"; $("projectForm").namespace.value = item.namespace_name || ""; $("projectForm").remark.value = item.remark || ""; $("projectForm").slowMs.value = item.slow_ms || 500; $("projectId").value = item.id; $("containerValue").value = item.containers || ""; renderNamespaceContainers(String(item.containers || "").split(/[\s,;]+/).filter(Boolean)); $("namespaceContainerStatus").textContent = ""; const picked = String(item.source_ids || "").split(","); document.querySelectorAll("#sourceChecks input").forEach((input) => { input.checked = picked.includes(input.value); }); $("projectSubmit").textContent = "保存修改"; updateScopeMode(); }); }
+$("newProject").onclick = () => { $("projectForm").reset(); $("projectId").value = ""; $("containerValue").value = ""; renderNamespaceContainers([]); $("namespaceContainerStatus").textContent = ""; $("projectForm").hidden = false; $("projectSubmit").textContent = "添加项目"; updateScopeMode(); };
 $("projectCancel").onclick = () => { $("projectForm").hidden = true; };
 $("projectForm").onsubmit = async (event) => { event.preventDefault(); if ($("deployMode").value === "host") syncHosts(); const body = formBody(event.target); body.set("sourceIds", [...document.querySelectorAll("#sourceChecks input:checked")].map((input) => input.value).join(",")); try { await api($("projectId").value ? "/api/projects/update" : "/api/projects", { method:"POST", body }); $("projectForm").hidden = true; loadProjects(); } catch (error) { $("projectStatus").textContent = error.message; } };
 async function loadFields() { const body = await api("/api/fields"); window.fieldCache = body.fields || []; window.fieldNames = Object.fromEntries(window.fieldCache.map((item) => [String(item.id), item.name])); window.fieldOptions = window.fieldCache.filter((item) => item.enabled).map((item) => `<option value="${item.id}">${esc(item.name)}</option>`).join(""); if (!$("conditionList").children.length) fillConditions([{}]); $("fieldTable").innerHTML = "<tr><th>名称</th><th></th></tr>" + window.fieldCache.map((item) => `<tr><td>${esc(item.name)}</td><td><button class="ghost" data-id="${item.id}" type="button">删除</button></td></tr>`).join(""); $("fieldTable").querySelectorAll("button").forEach((button) => button.onclick = async () => { await api("/api/fields/delete", { method:"POST", body: new URLSearchParams({id: button.dataset.id}) }); loadFields(); }); }
