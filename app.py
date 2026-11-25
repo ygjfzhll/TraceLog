@@ -634,6 +634,11 @@ def handle_user_permissions(self):
                 if not cur.fetchone():
                     raise ValueError("用户不存在")
                 save_user_access(cur, username, form)
+                password = form.get("password") or ""
+                if password:
+                    if len(password) < 6:
+                        raise ValueError("密码至少 6 位")
+                    cur.execute("UPDATE accounts SET password_hash=%s WHERE username=%s", (hash_password(password), username))
         self._json(200, {"ok": True})
     except ValueError as exc:
         self._json(400, {"error": str(exc)})
@@ -1370,12 +1375,47 @@ def handle_feishu_report(self, action):
         self._json(400, {"error": str(exc)[:180]})
 
 
+
+def handle_source_update(self):
+    form = read_form(self)
+    user = self._user()
+    if not user:
+        return
+    try:
+        require_admin(user)
+        source_id = (form.get("id") or "").strip()
+        name = (form.get("name") or "").strip()
+        base_url = (form.get("baseUrl") or "").strip().rstrip("/")
+        account_id = (form.get("accountId") or "1").strip() or "1"
+        project_id = (form.get("projectId") or "1").strip() or "1"
+        if not source_id.isdigit():
+            raise ValueError("日志接入不存在")
+        if not name or not base_url:
+            raise ValueError("请填写名称和地址")
+        with connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT id FROM log_sources WHERE id=%s", (int(source_id),))
+                if not cur.fetchone():
+                    raise ValueError("日志接入不存在")
+                cur.execute(
+                    "UPDATE log_sources SET name=%s, base_url=%s, account_id=%s, project_id=%s WHERE id=%s",
+                    (name[:80], base_url[:300], account_id[:20], project_id[:20], int(source_id)),
+                )
+        self._json(200, {"ok": True})
+    except ValueError as exc:
+        self._json(400, {"error": str(exc)})
+    except Exception as exc:
+        self._json(400, {"error": str(exc)[:180]})
+
+
 def Handler_do_POST(self):
     _limits.flags = {"seedLimited": False, "requestLimited": False, "chainLimited": False, "focused": False, "seedCap": SEED_LIMIT}
     _limits.trace_ids = []
     path = urlparse(self.path).path
     if path == "/api/audit/list":
         return handle_audit_list(self)
+    if path == "/api/sources/update":
+        return handle_source_update(self)
     if path == "/api/login/anonymous":
         return handle_anonymous_login(self)
     if path == "/api/new-api-stats":
@@ -1455,6 +1495,7 @@ _AUDIT_ACTIONS = {
     ("POST", "/api/stats/containers"): "查看容器",
     ("GET", "/api/namespaces/containers"): "按命名空间查看容器",
     ("POST", "/api/sources"): "添加日志接入",
+    ("POST", "/api/sources/update"): "修改日志接入",
     ("POST", "/api/sources/delete"): "删除日志接入",
     ("GET", "/api/sources"): "查看日志接入",
     ("POST", "/api/fields"): "添加查询条件",

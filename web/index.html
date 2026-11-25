@@ -20,6 +20,7 @@ aside { background:var(--side); color:#e5e7eb; padding:16px 12px; display:flex; 
 main { padding:24px 28px 40px; }
 .page { display:none; } .page.show { display:block; }
 .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; }
+.top button[hidden] { display:none !important; }
 h1 { font-size:18px; margin:0; }
 .card { background:#fff; border:1px solid var(--line); border-radius:16px; padding:16px 18px; }
 .grid { display:grid; grid-template-columns:320px 1fr; gap:14px; }
@@ -56,8 +57,19 @@ body:not(.authed) .shell { display:none; }
 #namespaceContainers { margin-top:8px; max-height:180px; overflow:auto; }
 #hostChecks { flex-direction:column; align-items:stretch; max-height:240px; overflow:auto; }
 #hostChecks label { justify-content:flex-start; gap:8px; }
-.modal { position:fixed; inset:0; background:rgba(16,24,40,.45); display:flex; justify-content:center; padding:8vh 16px; }
-.sheet { width:min(560px,100%); background:#fff; border-radius:14px; padding:18px; max-height:80vh; overflow:auto; }
+.modal { position:fixed; inset:0; background:rgba(16,24,40,.45); display:flex; align-items:flex-start; justify-content:center; overflow:auto; padding:10vh 16px 32px; }
+.sheet { width:min(480px,100%); height:auto; margin:0 auto; background:#fff; border-radius:16px; padding:20px 22px 16px; box-shadow:0 18px 48px rgba(15,23,42,.16); }
+#userTable td { vertical-align:middle; padding:12px 8px; }
+#userTable td:first-child { font-weight:600; }
+#userTable th:last-child, #userTable td:last-child { width:88px; text-align:right; }
+#userTable tr:hover td { background:#f8fafc; }
+#userTable .row-actions button { background:#fff; color:#334155; border:1px solid #e2e8f0; border-radius:8px; padding:4px 12px; cursor:pointer; font-size:13px; }
+#userTable .row-actions button:hover { background:#f8fafc; border-color:#cbd5e1; }
+#userForm .permit { display:flex; align-items:center; gap:8px; margin:8px 0 0; color:var(--ink); font-size:13px; }
+#userForm .permit input { width:auto; }
+#userForm h2 { margin:0 0 2px; }
+#userForm .checks { margin-top:6px; }
+#userForm .actions { justify-content:flex-end; margin-top:18px; padding-top:14px; border-top:1px solid var(--line); }
 .home-grid { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
 .home-grid.single { grid-template-columns:1fr; }
 .home-search { display:flex; align-items:center; gap:8px; }
@@ -143,7 +155,11 @@ h2 { font-size:15px; margin:0 0 12px; font-weight:650; }
 #reportList .row-actions button:hover { background:#f8fafc; }
 #reportList .row-actions button.danger { color:#b42318; border-color:#fecdca; }
 #reportForm[hidden], #reportChart[hidden], #reportTableCard[hidden] { display:none !important; }
-#dataSourceForm[hidden] { display:none !important; }
+#dataSourceForm[hidden], #sourceForm[hidden] { display:none !important; }
+#sourceTable .row-actions { white-space:nowrap; text-align:right; }
+#sourceTable .row-actions button { background:#fff; color:#334155; border:1px solid #e2e8f0; border-radius:6px; padding:3px 8px; margin-left:6px; cursor:pointer; font-size:12px; }
+#sourceTable .row-actions button:hover { background:#f8fafc; }
+#sourceTable .row-actions button.danger { color:#b42318; border-color:#fecdca; }
 #dataSourceTable .row-actions { white-space:nowrap; text-align:right; }
 #dataSourceTable .row-actions button { background:#fff; color:#334155; border:1px solid #e2e8f0; border-radius:6px; padding:3px 8px; margin-left:6px; cursor:pointer; font-size:12px; }
 #dataSourceTable .row-actions button:hover { background:#f8fafc; }
@@ -217,12 +233,17 @@ h2 { font-size:15px; margin:0 0 12px; font-weight:650; }
 </div><input type="hidden" name="id" id="projectId" /><input type="hidden" name="containers" id="containerValue" />
 <div class="actions"><button class="primary" id="projectSubmit" type="submit">添加项目</button><button class="ghost" id="projectCancel" type="button">取消</button></div>
 <p class="meta" id="projectStatus"></p></div></form></section>
-<section class="page" id="page-sources"><div class="top"><h1>日志接入</h1></div>
-<form class="card" id="sourceForm"><div class="fields">
+<section class="page" id="page-sources"><div class="top"><h1>日志接入</h1><button class="primary" id="sourceNew" type="button">新增日志接入</button></div>
+<div class="card"><table id="sourceTable"></table></div>
+<form class="card" id="sourceForm" hidden style="margin-top:14px"><div class="top"><h2 id="sourceTitle">新增日志接入</h2><button class="ghost" id="sourceClose" type="button">收起</button></div>
+<input type="hidden" id="sourceId" name="id" />
+<div class="fields">
 <div><label>名称</label><input name="name" required /></div><div><label>地址</label><input name="baseUrl" required /></div>
 <div><label>Account ID</label><input name="accountId" value="1" /></div><div><label>Project ID</label><input name="projectId" value="1" /></div>
-</div><button class="primary" type="submit">添加</button><p class="meta" id="sourceStatus"></p></form>
-<div class="card" style="margin-top:14px"><table id="sourceTable"></table></div></section>
+</div>
+<div class="actions"><button class="primary" type="submit">保存</button></div>
+</form>
+<p class="meta" id="sourceStatus"></p></section>
 <section class="page" id="page-fields"><div class="top"><h1>查询条件</h1></div>
 <form class="card" id="fieldForm"><div class="fields">
 <div><label>名称</label><input name="name" required /></div>
@@ -230,14 +251,14 @@ h2 { font-size:15px; margin:0 0 12px; font-weight:650; }
 <div class="span-2" id="patternBox" hidden><label>模板，用 {value}</label><textarea name="pattern" rows="3"></textarea></div>
 </div><input type="hidden" name="id" id="fieldId" /><button class="primary" type="submit">添加条件</button><p class="meta" id="fieldStatus"></p></form>
 <div class="card" style="margin-top:14px"><table id="fieldTable"></table></div></section>
-<section class="page" id="page-users"><div class="top"><h1>用户管理</h1><button class="primary" id="openUser" type="button">添加用户</button><button class="ghost" id="openPassword" type="button">修改我的密码</button></div>
+<section class="page" id="page-users"><div class="top"><h1>用户管理</h1><button class="primary" id="openUser" type="button">添加用户</button><button class="ghost" id="openPassword" type="button" hidden>修改我的密码</button></div>
 <div class="card"><table id="userTable"></table></div>
 <form class="modal" id="userForm" hidden><div class="sheet"><h2 id="userFormTitle">添加用户</h2>
 <label>用户名</label><input name="username" id="userName" required />
-<div id="userPasswordBox"><label>密码</label><input name="password" type="password" /></div>
-<label><input type="checkbox" id="canCreateProject" name="canCreateProject" value="1" style="width:auto" /> 允许新建项目</label>
-<label><input type="checkbox" id="canDataSource" name="canDataSource" value="1" style="width:auto" /> 允许数据接入</label>
-<label><input type="checkbox" id="canReport" name="canReport" value="1" style="width:auto" /> 允许日志报表</label>
+<div id="userPasswordBox"><label id="userPasswordLabel">密码</label><input name="password" id="userPassword" type="password" autocomplete="new-password" /></div>
+<label class="permit"><input type="checkbox" id="canCreateProject" name="canCreateProject" value="1" />允许新建项目</label>
+<label class="permit"><input type="checkbox" id="canDataSource" name="canDataSource" value="1" />允许数据接入</label>
+<label class="permit"><input type="checkbox" id="canReport" name="canReport" value="1" />允许日志报表</label>
 <label>可查看的项目</label><div id="grantProjects" class="checks"></div>
 <label>可查看的数据源</label><div id="grantSources" class="checks"></div><input type="hidden" id="userEditing" />
 <div class="actions"><button class="primary" type="submit">保存</button><button class="ghost" type="button" data-close="userForm">取消</button></div>
@@ -602,8 +623,47 @@ $("newStat").onclick = () => {
 };
 
 
-async function loadSources() { const body = await api("/api/sources"); window.sourceCache = body.sources || []; $("sourceChecks").innerHTML = window.sourceCache.map((item) => `<label><input type="checkbox" name="sourceIds" value="${item.id}" style="width:auto" />${esc(item.name)}</label>`).join(""); $("sourceTable").innerHTML = "<tr><th>名称</th><th>地址</th><th>Account ID</th><th>Project ID</th><th></th></tr>" + window.sourceCache.map((item) => `<tr><td>${esc(item.name)}</td><td>${esc(item.base_url)}</td><td>${esc(item.account_id || "")}</td><td>${esc(item.project_id || "")}</td><td><button class="ghost" data-id="${item.id}" type="button">删除</button></td></tr>`).join(""); $("sourceTable").querySelectorAll("button").forEach((button) => button.onclick = async () => { if (!confirm("删除？")) return; await api("/api/sources/delete", { method:"POST", body: new URLSearchParams({id: button.dataset.id}) }); loadSources(); }); }
-$("sourceForm").onsubmit = async (event) => { event.preventDefault(); try { await api("/api/sources", { method:"POST", body: formBody(event.target) }); $("sourceStatus").textContent = "已添加"; loadSources(); } catch (error) { $("sourceStatus").textContent = error.message; } };
+async function loadSources() { const body = await api("/api/sources"); window.sourceCache = body.sources || []; $("sourceChecks").innerHTML = window.sourceCache.map((item) => `<label><input type="checkbox" name="sourceIds" value="${item.id}" style="width:auto" />${esc(item.name)}</label>`).join(""); $("sourceTable").innerHTML = "<tr><th>名称</th><th>地址</th><th>Account ID</th><th>Project ID</th><th></th></tr>" + window.sourceCache.map((item) => `<tr><td>${esc(item.name)}</td><td>${esc(item.base_url)}</td><td>${esc(item.account_id ?? "")}</td><td>${esc(item.project_id ?? "")}</td><td class="row-actions"><button data-act="edit" data-id="${item.id}" type="button">编辑</button><button data-act="save" data-id="${item.id}" type="button">保存</button><button class="danger" data-act="delete" data-id="${item.id}" type="button">删除</button></td></tr>`).join(""); $("sourceTable").querySelectorAll("button").forEach((button) => button.onclick = () => actSource(button.dataset.id, button.dataset.act)); }
+function showSourceForm(item) {
+  const form = $("sourceForm");
+  form.hidden = false;
+  if (!item) {
+    form.reset();
+    $("sourceId").value = "";
+    form.accountId.value = "1";
+    form.projectId.value = "1";
+    $("sourceTitle").textContent = "新增日志接入";
+  } else {
+    $("sourceId").value = item.id;
+    form.name.value = item.name || "";
+    form.baseUrl.value = item.base_url || "";
+    form.accountId.value = item.account_id ?? "1";
+    form.projectId.value = item.project_id ?? "1";
+    $("sourceTitle").textContent = "编辑日志接入";
+  }
+  $("sourceStatus").textContent = "";
+}
+async function actSource(id, act) {
+  if (act === "delete") {
+    if (!confirm("删除这个日志接入？")) return;
+    try {
+      await api("/api/sources/delete", { method:"POST", body: new URLSearchParams({id}) });
+      if ($("sourceId").value === String(id)) $("sourceForm").hidden = true;
+      loadSources();
+    } catch (error) { $("sourceStatus").textContent = error.message; }
+    return;
+  }
+  if (act === "save") {
+    if ($("sourceForm").hidden || $("sourceId").value !== String(id)) { $("sourceStatus").textContent = "请先编辑这一条，再保存"; return; }
+    $("sourceForm").requestSubmit();
+    return;
+  }
+  const item = (window.sourceCache || []).find((row) => String(row.id) === String(id));
+  if (item) showSourceForm(item);
+}
+$("sourceNew").onclick = () => showSourceForm(null);
+$("sourceClose").onclick = () => { $("sourceForm").hidden = true; };
+$("sourceForm").onsubmit = async (event) => { event.preventDefault(); $("sourceStatus").textContent = "正在保存…"; try { await api($("sourceId").value ? "/api/sources/update" : "/api/sources", { method:"POST", body: formBody(event.target) }); $("sourceStatus").textContent = "已保存"; $("sourceForm").hidden = true; loadSources(); } catch (error) { $("sourceStatus").textContent = error.message; } };
 
 
 function namespaceContainerSelection() {
@@ -735,8 +795,8 @@ $("auditSearch").onclick = loadAudit;
 async function loadFields() { const body = await api("/api/fields"); window.fieldCache = body.fields || []; window.fieldNames = Object.fromEntries(window.fieldCache.map((item) => [String(item.id), item.name])); window.fieldOptions = window.fieldCache.filter((item) => item.enabled).map((item) => `<option value="${item.id}">${esc(item.name)}</option>`).join(""); if (!$("conditionList").children.length) fillConditions([{}]); $("fieldTable").innerHTML = "<tr><th>名称</th><th></th></tr>" + window.fieldCache.map((item) => `<tr><td>${esc(item.name)}</td><td><button class="ghost" data-id="${item.id}" type="button">删除</button></td></tr>`).join(""); $("fieldTable").querySelectorAll("button").forEach((button) => button.onclick = async () => { await api("/api/fields/delete", { method:"POST", body: new URLSearchParams({id: button.dataset.id}) }); loadFields(); }); }
 $("fieldKind").onchange = () => { $("patternBox").hidden = $("fieldKind").value !== "template"; };
 $("fieldForm").onsubmit = async (event) => { event.preventDefault(); try { await api("/api/fields", { method:"POST", body: formBody(event.target) }); $("fieldStatus").textContent = "已保存"; loadFields(); } catch (error) { $("fieldStatus").textContent = error.message; } };
-async function loadUsers() { if (!window.isAdmin) return; const body = await api("/api/users"); window.userCache = body.users || []; $("userTable").innerHTML = "<tr><th>用户</th><th></th></tr>" + window.userCache.map((item) => `<tr><td>${esc(item.username)}</td><td><button class="ghost" data-name="${esc(item.username)}" type="button">权限</button></td></tr>`).join(""); $("userTable").querySelectorAll("button").forEach((button) => button.onclick = () => openUser(window.userCache.find((item) => item.username === button.dataset.name))); }
-async function openUser(item) { $("userForm").hidden = false; $("userEditing").value = item ? "1" : ""; $("userName").value = item ? item.username : ""; $("userName").readOnly = !!item; $("userPasswordBox").hidden = !!item; $("canCreateProject").checked = !!(item && (item.is_admin || item.can_create_project)); $("canDataSource").checked = !!(item && (item.is_admin || item.can_use_datasource)); $("canReport").checked = !!(item && (item.is_admin || item.can_use_report)); const picked = new Set(item ? String(item.project_ids || "").split(",") : []); $("grantProjects").innerHTML = (window.projectCache || []).map((project) => `<label><input type="checkbox" name="projectIds" value="${project.id}" ${picked.has(String(project.id)) ? "checked" : ""} style="width:auto" />${esc(project.name)}</label>`).join(""); try { await loadDataSources(); } catch (error) {} const pickedSources = new Set(item ? String(item.data_source_ids || "").split(",") : []); $("grantSources").innerHTML = dataSources.length ? dataSources.map((source) => `<label><input type="checkbox" name="dataSourceIds" value="${source.id}" ${pickedSources.has(String(source.id)) ? "checked" : ""} style="width:auto" />${esc(source.name)}</label>`).join("") : "<span class='meta'>还没有数据源</span>"; }
+async function loadUsers() { if (!window.isAdmin) return; const body = await api("/api/users"); window.userCache = body.users || []; $("userTable").innerHTML = "<tr><th>用户</th><th></th></tr>" + window.userCache.map((item) => `<tr><td>${esc(item.username)}</td><td class="row-actions"><button data-name="${esc(item.username)}" type="button">编辑</button></td></tr>`).join(""); $("userTable").querySelectorAll("button").forEach((button) => button.onclick = () => openUser(window.userCache.find((item) => item.username === button.dataset.name))); }
+async function openUser(item) { $("userForm").hidden = false; $("userEditing").value = item ? "1" : ""; $("userFormTitle").textContent = item ? "编辑用户" : "添加用户"; $("userName").value = item ? item.username : ""; $("userName").readOnly = !!item; $("userPasswordBox").hidden = false; $("userPassword").value = ""; $("userPasswordLabel").textContent = item ? "新密码" : "密码"; $("userPassword").placeholder = item ? "不修改请留空" : ""; $("canCreateProject").checked = !!(item && (item.is_admin || item.can_create_project)); $("canDataSource").checked = !!(item && (item.is_admin || item.can_use_datasource)); $("canReport").checked = !!(item && (item.is_admin || item.can_use_report)); const picked = new Set(item ? String(item.project_ids || "").split(",") : []); $("grantProjects").innerHTML = (window.projectCache || []).map((project) => `<label><input type="checkbox" name="projectIds" value="${project.id}" ${picked.has(String(project.id)) ? "checked" : ""} style="width:auto" />${esc(project.name)}</label>`).join(""); try { await loadDataSources(); } catch (error) {} const pickedSources = new Set(item ? String(item.data_source_ids || "").split(",") : []); $("grantSources").innerHTML = dataSources.length ? dataSources.map((source) => `<label><input type="checkbox" name="dataSourceIds" value="${source.id}" ${pickedSources.has(String(source.id)) ? "checked" : ""} style="width:auto" />${esc(source.name)}</label>`).join("") : "<span class='meta'>还没有数据源</span>"; }
 $("openUser").onclick = () => openUser(null);
 $("openPassword").onclick = () => { $("passwordForm").hidden = false; };
 document.querySelectorAll("[data-close]").forEach((button) => button.onclick = () => { $(button.dataset.close).hidden = true; });
