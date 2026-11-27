@@ -12,5 +12,6 @@ victorialogs:
   account_id: "1"
   project_id: "1"
 auth:
+  data_key: ""
   admin_user: admin
   admin_password: admin

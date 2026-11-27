@@ -1,0 +1,17 @@
+mysql:
+  host: 127.0.0.1
+  port: "3306"
+  user: adam
+  password: "Adamlv159@#"
+  database: TraceLog
+server:
+  host: 0.0.0.0
+  port: "8789"
+victorialogs:
+  url: http://172.16.33.86:9428
+  account_id: "1"
+  project_id: "1"
+auth:
+  data_key: 44360eaa4bceac8a015362b1b42579335db6d98b636752910a584651b349f4ab
+  admin_user: admin
+  admin_password: admin

@@ -136,7 +136,7 @@ CREATE TABLE IF NOT EXISTS data_sources (
   host VARCHAR(191) NOT NULL,
   port INT NOT NULL DEFAULT 3306,
   username VARCHAR(80) NOT NULL,
-  password VARCHAR(255) NOT NULL,
+  password VARCHAR(512) NOT NULL,
   database_name VARCHAR(80) NOT NULL,
   created_at DATETIME NOT NULL
 );

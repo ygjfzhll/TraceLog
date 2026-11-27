@@ -176,20 +176,7 @@ def init_db():
                 cur.execute("SHOW COLUMNS FROM accounts LIKE %s", (column,))
                 if not cur.fetchone():
                     cur.execute("ALTER TABLE accounts ADD COLUMN " + column + " TINYINT NOT NULL DEFAULT 0")
-            cur.execute(
-                """
-                CREATE TABLE IF NOT EXISTS data_sources (
-                  id BIGINT PRIMARY KEY AUTO_INCREMENT,
-                  name VARCHAR(80) NOT NULL,
-                  host VARCHAR(191) NOT NULL,
-                  port INT NOT NULL DEFAULT 3306,
-                  username VARCHAR(80) NOT NULL,
-                  password VARCHAR(255) NOT NULL,
-                  database_name VARCHAR(80) NOT NULL,
-                  created_at DATETIME NOT NULL
-                )
-                """
-            )
+            ensure_data_sources(cur)
 
             cur.execute(
                 """
@@ -678,6 +665,71 @@ def handle_user_create(self):
             self._json(400, {"error": str(exc)[:180]})
 
 
+def _data_key():
+    import hashlib
+    auth = CFG.setdefault("auth", {})
+    secret = str(auth.get("data_key") or "").strip()
+    if secret:
+        return hashlib.sha256(secret.encode("utf-8")).digest()
+    secret = secrets.token_hex(32)
+    auth["data_key"] = secret
+    path = Path(__file__).with_name("config.yaml")
+    raw_text = path.read_text(encoding="utf-8") if path.exists() else ""
+    newline = "\n"
+    if "data_key:" in raw_text:
+        lines = []
+        for line in raw_text.splitlines():
+            lines.append(("  data_key: " + secret) if line.strip().startswith("data_key:") else line)
+        raw_text = newline.join(lines) + newline
+    elif "auth:" in raw_text:
+        raw_text = raw_text.replace("auth:" + newline, "auth:" + newline + "  data_key: " + secret + newline, 1)
+    else:
+        raw_text += newline + "auth:" + newline + "  data_key: " + secret + newline
+    path.write_bytes(raw_text.encode("utf-8"))
+    return hashlib.sha256(secret.encode("utf-8")).digest()
+
+
+def _secret_stream(key, nonce, size):
+    import hashlib
+    out = bytearray()
+    counter = 0
+    while len(out) < size:
+        out.extend(hashlib.sha256(key + nonce + counter.to_bytes(4, "big")).digest())
+        counter += 1
+    return bytes(out[:size])
+
+
+def encrypt_secret(text):
+    import base64
+    import hashlib
+    import hmac
+    value = text or ""
+    if value.startswith("enc:v1:"):
+        return value
+    key = _data_key()
+    nonce = secrets.token_bytes(16)
+    body = bytes(left ^ right for left, right in zip(value.encode("utf-8"), _secret_stream(key, nonce, len(value.encode("utf-8")))))
+    mac = hmac.new(key, nonce + body, hashlib.sha256).digest()
+    return "enc:v1:" + base64.urlsafe_b64encode(nonce + mac + body).decode("ascii")
+
+
+def decrypt_secret(stored):
+    import base64
+    import hashlib
+    import hmac
+    value = stored or ""
+    if not value.startswith("enc:v1:"):
+        return value
+    raw = base64.urlsafe_b64decode(value[len("enc:v1:"):].encode("ascii"))
+    nonce, mac, body = raw[:16], raw[16:48], raw[48:]
+    key = _data_key()
+    expect = hmac.new(key, nonce + body, hashlib.sha256).digest()
+    if not hmac.compare_digest(mac, expect):
+        raise ValueError("数据源密码无法解密，请重新填写")
+    plain = bytes(left ^ right for left, right in zip(body, _secret_stream(key, nonce, len(body))))
+    return plain.decode("utf-8")
+
+
 def ensure_data_sources(cur):
     cur.execute(
         """
@@ -687,12 +739,22 @@ def ensure_data_sources(cur):
           host VARCHAR(191) NOT NULL,
           port INT NOT NULL DEFAULT 3306,
           username VARCHAR(80) NOT NULL,
-          password VARCHAR(255) NOT NULL,
+          password VARCHAR(512) NOT NULL,
           database_name VARCHAR(80) NOT NULL,
           created_at DATETIME NOT NULL
         )
         """
     )
+    cur.execute("SHOW COLUMNS FROM data_sources LIKE 'password'")
+    column = cur.fetchone()
+    if column and "512" not in str(column.get("Type") or ""):
+        cur.execute("ALTER TABLE data_sources MODIFY password VARCHAR(512) NOT NULL")
+    cur.execute("SELECT id, password FROM data_sources")
+    for item in cur.fetchall():
+        stored = item.get("password") or ""
+        if stored.startswith("enc:v1:"):
+            continue
+        cur.execute("UPDATE data_sources SET password=%s WHERE id=%s", (encrypt_secret(stored), item["id"]))
 
 
 def data_source_row(cur, source_id):
@@ -713,7 +775,7 @@ def connect_data_source(row, read_timeout=20):
             host=row["host"],
             port=int(row["port"] or 3306),
             user=row["username"],
-            password=row["password"],
+            password=decrypt_secret(row.get("password") or ""),
             database=row["database_name"],
             connect_timeout=5,
             read_timeout=read_timeout,
@@ -722,7 +784,7 @@ def connect_data_source(row, read_timeout=20):
         )
     except Exception as exc:
         message = str(exc)
-        secret = row.get("password") or ""
+        secret = decrypt_secret(row.get("password") or "")
         if secret:
             message = message.replace(secret, "******")
         raise ValueError("连接失败：" + message[:180])
@@ -794,6 +856,8 @@ def save_data_source(form):
                 current = data_source_row(cur, source_id)
                 if not password:
                     password = current["password"]
+                else:
+                    password = encrypt_secret(password)
                 cur.execute(
                     """
                     UPDATE data_sources
@@ -810,7 +874,7 @@ def save_data_source(form):
                     INSERT INTO data_sources (name, host, port, username, password, database_name, created_at)
                     VALUES (%s,%s,%s,%s,%s,%s,%s)
                     """,
-                    (name, host, port, username, password, database_name, datetime.now()),
+                    (name, host, port, username, encrypt_secret(password), database_name, datetime.now()),
                 )
 
 
