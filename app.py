@@ -706,7 +706,7 @@ def data_source_row(cur, source_id):
     return row
 
 
-def connect_data_source(row):
+def connect_data_source(row, read_timeout=20):
     import pymysql
     try:
         return pymysql.connect(
@@ -716,7 +716,7 @@ def connect_data_source(row):
             password=row["password"],
             database=row["database_name"],
             connect_timeout=5,
-            read_timeout=20,
+            read_timeout=read_timeout,
             charset="utf8mb4",
             cursorclass=pymysql.cursors.DictCursor,
         )
@@ -932,6 +932,173 @@ def report_query(source_id, sql):
     columns = list(found[0].keys()) if found else []
     rows = [{key: plain_cell(value) for key, value in item.items()} for item in found]
     return {"columns": columns, "rows": rows, "truncated": False}
+
+
+def gpu_bounds(window):
+    now = datetime.now().replace(microsecond=0)
+    if window == "1h":
+        return now - timedelta(hours=1), now
+    if window == "6h":
+        return now - timedelta(hours=6), now
+    if window == "today":
+        return now.replace(hour=0, minute=0, second=0), now
+    if window == "7d":
+        return now - timedelta(days=7), now
+    return now - timedelta(hours=24), now
+
+
+def gpu_months(start, end):
+    months = []
+    year, month = start.year, start.month
+    while (year, month) <= (end.year, end.month):
+        months.append("%04d%02d" % (year, month))
+        month += 1
+        if month == 13:
+            year += 1
+            month = 1
+    return months
+
+
+def gpu_existing_tables(link, database, prefix, months):
+    wanted = ["%s_%s" % (prefix, item) for item in months]
+    safe = [name for name in wanted if re.fullmatch(r"vsr_task_(timing|shot)_\d{6}", name)]
+    if not safe:
+        return []
+    with link.cursor() as cur:
+        marks = ",".join(["%s"] * len(safe))
+        cur.execute(
+            "SELECT table_name AS name FROM information_schema.tables WHERE table_schema=%s AND table_name IN (" + marks + ")",
+            tuple([database] + safe),
+        )
+        found = {item["name"] for item in cur.fetchall()}
+    return [name for name in safe if name in found]
+
+
+def gpu_add(bucket, item, fields):
+    for name in fields:
+        bucket[name] = bucket.get(name, 0) + (plain_cell(item.get(name)) or 0)
+
+
+def gpu_avg(total, count):
+    total = plain_cell(total) or 0
+    count = plain_cell(count) or 0
+    if not count:
+        return None
+    return round(float(total) / float(count))
+
+
+def gpu_report(source_id, window):
+    start, end = gpu_bounds(window)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            ensure_data_sources(cur)
+            row = data_source_row(cur, source_id)
+    link = connect_data_source(row, 40)
+    try:
+        months = gpu_months(start, end)
+        timing_tables = gpu_existing_tables(link, row["database_name"], "vsr_task_timing", months)
+        shot_tables = gpu_existing_tables(link, row["database_name"], "vsr_task_shot", months)
+        if not timing_tables and not shot_tables:
+            raise ValueError("这个数据源没有视频增强任务表")
+        machines = {}
+        gpus = {}
+        with link.cursor() as cur:
+            for name in timing_tables:
+                cur.execute(
+                    """
+                    SELECT private_server_ip AS ip, COUNT(*) AS tasks, SUM(status='failed') AS failed,
+                           SUM(shots_infer_wall_ms) AS infer_sum, SUM(shots_infer_wall_ms IS NOT NULL) AS infer_n,
+                           SUM(TIMESTAMPDIFF(SECOND, video_decode_start, video_decode_end)) AS decode_sum,
+                           SUM(video_decode_start IS NOT NULL AND video_decode_end IS NOT NULL) AS decode_n,
+                           SUM(TIMESTAMPDIFF(SECOND, video_encode_start, video_encode_end)) AS encode_sum,
+                           SUM(video_encode_start IS NOT NULL AND video_encode_end IS NOT NULL) AS encode_n,
+                           SUM(total_frames) AS frames
+                    FROM `%s`
+                    WHERE created_at >= %%s AND created_at < %%s AND private_server_ip <> ''
+                    GROUP BY private_server_ip
+                    """ % name,
+                    (start, end),
+                )
+                for item in cur.fetchall():
+                    ip = str(item.get("ip") or "").strip()
+                    if not ip:
+                        continue
+                    bucket = machines.setdefault(ip, {})
+                    gpu_add(bucket, item, ("tasks", "failed", "infer_sum", "infer_n", "decode_sum", "decode_n", "encode_sum", "encode_n", "frames"))
+            for name in shot_tables:
+                cur.execute(
+                    """
+                    SELECT private_server_ip AS ip, gpu_id, COUNT(*) AS shots, SUM(status='failed') AS failed,
+                           SUM(elapsed_ms) AS elapsed_sum, SUM(elapsed_ms IS NOT NULL) AS elapsed_n
+                    FROM `%s`
+                    WHERE created_at >= %%s AND created_at < %%s AND private_server_ip <> '' AND gpu_id IS NOT NULL
+                    GROUP BY private_server_ip, gpu_id
+                    """ % name,
+                    (start, end),
+                )
+                for item in cur.fetchall():
+                    ip = str(item.get("ip") or "").strip()
+                    try:
+                        gpu_id = int(item.get("gpu_id"))
+                    except (TypeError, ValueError):
+                        continue
+                    if not ip or gpu_id < 0 or gpu_id > 15:
+                        continue
+                    bucket = gpus.setdefault((ip, gpu_id), {})
+                    gpu_add(bucket, item, ("shots", "failed", "elapsed_sum", "elapsed_n"))
+    finally:
+        link.close()
+    machine_rows = []
+    for ip, item in machines.items():
+        machine_rows.append({
+            "ip": ip,
+            "tasks": int(item.get("tasks") or 0),
+            "failed": int(item.get("failed") or 0),
+            "infer_ms": gpu_avg(item.get("infer_sum"), item.get("infer_n")),
+            "decode_ms": None if gpu_avg(item.get("decode_sum"), item.get("decode_n")) is None else gpu_avg(item.get("decode_sum"), item.get("decode_n")) * 1000,
+            "encode_ms": None if gpu_avg(item.get("encode_sum"), item.get("encode_n")) is None else gpu_avg(item.get("encode_sum"), item.get("encode_n")) * 1000,
+            "frames": int(item.get("frames") or 0),
+        })
+    machine_rows.sort(key=lambda item: (-(item["infer_ms"] or 0), item["ip"]))
+    gpu_rows = []
+    for (ip, gpu_id), item in gpus.items():
+        gpu_rows.append({
+            "ip": ip,
+            "gpu_id": gpu_id,
+            "shots": int(item.get("shots") or 0),
+            "failed": int(item.get("failed") or 0),
+            "avg_ms": gpu_avg(item.get("elapsed_sum"), item.get("elapsed_n")),
+        })
+    gpu_rows.sort(key=lambda item: (item["ip"], item["gpu_id"]))
+    return {
+        "machines": machine_rows,
+        "gpus": gpu_rows,
+        "from": start.strftime("%Y-%m-%d %H:%M"),
+        "to": end.strftime("%Y-%m-%d %H:%M"),
+    }
+
+
+def handle_gpu_report(self):
+    form = read_form(self)
+    user = self._user()
+    if not user:
+        return
+    try:
+        if not module_allowed(user, "can_use_report"):
+            raise ValueError("没有日志报表权限")
+        source_id = (form.get("sourceId") or "").strip()
+        if not source_id.isdigit():
+            raise ValueError("请选择数据源")
+        if not can_query_source(user, source_id):
+            raise ValueError("没有这个数据源的权限")
+        window = (form.get("window") or "24h").strip()
+        if window not in ("1h", "6h", "24h", "today", "7d"):
+            window = "24h"
+        self._json(200, gpu_report(source_id, window))
+    except ValueError as exc:
+        self._json(400, {"error": str(exc)})
+    except Exception as exc:
+        self._json(400, {"error": str(exc)[:180]})
 
 
 def handle_data_sources(self, action):
@@ -1446,6 +1613,8 @@ def Handler_do_POST(self):
         return handle_saved_reports(self, "delete")
     if path == "/api/reports/saved":
         return handle_saved_reports(self, "save")
+    if path == "/api/reports/gpu":
+        return handle_gpu_report(self)
     if path == "/api/reports/tables":
         return handle_report(self, "tables")
     if path == "/api/reports/columns":
@@ -1508,6 +1677,7 @@ _AUDIT_ACTIONS = {
     ("POST", "/api/data-sources/delete"): "删除数据接入",
     ("POST", "/api/data-sources/test"): "测试数据接入",
     ("POST", "/api/data-sources/list"): "查看数据接入",
+    ("POST", "/api/reports/gpu"): "查看GPU机器",
     ("POST", "/api/reports/query"): "绘制报表",
     ("POST", "/api/reports/saved"): "保存报表",
     ("POST", "/api/reports/saved/delete"): "删除报表",
@@ -1797,15 +1967,36 @@ def api_stats(sources, deploy_mode, namespaces, containers, window, time_from=""
             "max(latency) as max_ms, avg(latency) as avg_ms, quantile(0.95, latency) as p95_ms, count() if (status:>=400) as errors | "
             "sort by (hits desc) | limit 1000",
         ))
-    merged = {}
-    allowed = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
-    for scale, query in queries:
+    from concurrent.futures import ThreadPoolExecutor, wait
+
+    def run(scale, query):
+        found = []
+        failure = None
         for source in sources:
             try:
-                found = fetch_rows(source, query, 1000, 20)
-            except Exception:
-                continue
-            for row in found:
+                found.extend(fetch_rows(source, query, 1000, 25))
+            except Exception as exc:
+                failure = exc
+        return scale, found, failure
+
+    pool = ThreadPoolExecutor(max_workers=max(1, len(queries)))
+    futures = [pool.submit(run, scale, query) for scale, query in queries]
+    done, pending = wait(futures, timeout=28)
+    pool.shutdown(wait=False, cancel_futures=True)
+    merged = {}
+    failures = []
+    allowed = {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}
+    for fut in done:
+        if fut.cancelled():
+            continue
+        error = fut.exception()
+        if error:
+            failures.append(error)
+            continue
+        scale, found, failure = fut.result()
+        if failure:
+            failures.append(failure)
+        for row in found:
                 uri = str(row.get("uri") or row.get("path") or "").split("?")[0].split("#")[0].strip()
                 container = str(row.get("container_name") or "").strip()
                 method = str(row.get("method") or "").strip().upper()
@@ -1839,6 +2030,11 @@ def api_stats(sources, deploy_mode, namespaces, containers, window, time_from=""
                     item["min_ms"] = min_ms if item.get("min_ms") is None else min(item["min_ms"], min_ms)
                 item["hits"] = total
                 item["errors"] += errors
+    if not merged and (pending or failures):
+        timed_out = bool(pending) or any(("超时" in str(item)) or ("timed out" in str(item).lower()) for item in failures)
+        if timed_out:
+            raise ValueError("实时统计超时，请先选择一个容器，或取消实时改用汇总")
+        raise ValueError("实时统计失败：" + str(failures[0])[:80])
     return sorted(merged.values(), key=lambda item: item["hits"], reverse=True)[:1000]
 
 

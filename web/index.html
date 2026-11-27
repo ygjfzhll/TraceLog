@@ -169,6 +169,23 @@ h2 { font-size:15px; margin:0 0 12px; font-weight:650; }
 #dataSourceTable .row-actions button.danger { color:#b42318; border-color:#fecdca; }
 #reportData th select { width:auto; min-width:128px; height:28px; margin:6px 0 0; padding:0 8px; font-size:12px; background:#fff; }
 #reportData th { vertical-align:bottom; }
+
+#gpuBoard .gpu-tools { display:flex; gap:8px; align-items:center; }
+#gpuBoard .gpu-tools select { width:220px; height:36px; }
+#gpuBoard .gpu-tools select.window { width:140px; }
+.gpu-row { display:grid; grid-template-columns:148px 72px 64px 1fr 88px; gap:10px; align-items:center; padding:10px 4px; border-bottom:1px solid #f1f5f9; cursor:pointer; }
+.gpu-row.head { color:var(--muted); font-size:12px; cursor:default; }
+.gpu-row.on { background:#f8fafc; }
+.gpu-stack { display:flex; height:8px; border-radius:99px; overflow:hidden; background:#e8eef7; }
+.gpu-stack i { display:block; height:100%; }
+.gpu-stack .decode { background:#93c5fd; }
+.gpu-stack .infer { background:#2563eb; }
+.gpu-stack .encode { background:#7c3aed; }
+.gpu-cards { display:grid; grid-template-columns:repeat(4, 1fr); gap:8px; margin-top:12px; }
+.gpu-card { border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+.gpu-card.bad { border-color:#fecaca; background:#fff7f6; }
+.gpu-card .bar { height:6px; margin-top:8px; border-radius:99px; background:#e8eef7; overflow:hidden; }
+.gpu-card .bar span { display:block; height:100%; background:#2563eb; }
 </style>
 </head>
 <body>
@@ -289,6 +306,9 @@ h2 { font-size:15px; margin:0 0 12px; font-weight:650; }
 </form>
 <p class="meta" id="dataSourceStatus"></p></section>
 <section class="page" id="page-reports"><div class="top"><h1>日志报表</h1><button class="primary" id="reportNew" type="button">新建报表</button></div>
+<div class="card" id="gpuBoard" style="margin-bottom:14px"><div class="top"><h2>GPU 机器</h2><div class="gpu-tools"><select id="gpuSource"></select><select id="gpuWindow" class="window"><option value="1h">最近 1 小时</option><option value="6h">最近 6 小时</option><option value="24h" selected>最近 24 小时</option><option value="today">今天</option><option value="7d">最近 7 天</option></select><button class="primary" id="gpuLoad" type="button">查看</button><button class="ghost" id="gpuFold" type="button">收起</button></div></div>
+<div id="gpuBody" hidden><p class="meta" id="gpuStatus"></p>
+<div id="gpuMachines"></div><div id="gpuDetail"></div></div></div>
 <div class="card" id="reportList"></div>
 <form class="card" id="reportForm" hidden style="margin-top:14px"><div class="top"><h2 id="reportEditTitle">新建报表</h2><button class="ghost" id="reportEditClose" type="button">收起</button></div>
 <input type="hidden" id="reportId" />
@@ -319,6 +339,10 @@ async function api(url, options) {
   let body = null;
   try { body = text ? JSON.parse(text) : {}; } catch (error) { body = null; }
   if (!res.ok || body === null) {
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      const stats = String(url || "").indexOf("api-stats") >= 0;
+      throw new Error(stats ? "实时统计超时，请先选一个容器，或取消实时改用汇总" : "请求超时，请稍后再试");
+    }
     const raw = body && body.error ? String(body.error) : String(text || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
     throw new Error(raw ? ("请求失败：" + res.status + " " + raw.slice(0, 180)) : ("请求失败：" + res.status));
   }
@@ -883,6 +907,7 @@ async function loadDataSources(scope) {
     table.querySelectorAll("button").forEach((button) => button.onclick = () => actDataSource(button.dataset.id, button.dataset.act));
   }
   fillSourceSelect($("reportSource"), $("reportSource") && $("reportSource").value);
+  fillSourceSelect($("gpuSource"), $("gpuSource") && $("gpuSource").value);
 }
 function dataSourceFormValues() {
   const form = $("dataSourceForm");
@@ -1290,6 +1315,63 @@ $("feishuSend").onclick = async () => {
     $("feishuStatus").textContent = "已发送";
   } catch (error) { $("feishuStatus").textContent = error.message; }
 };
+
+
+let gpuState = { ip: "" };
+function gpuSeconds(ms) { if (ms === null || ms === undefined || ms === "") return "-"; const value = Number(ms) / 1000; if (!value) return "-"; return value >= 10 ? Math.round(value) + " 秒" : value.toFixed(1) + " 秒"; }
+function gpuFrames(value) { const count = Number(value) || 0; if (count >= 10000) return (count / 10000).toFixed(1) + " 万"; return String(count); }
+function gpuMedian(values) { const rows = values.filter((item) => item > 0).sort((a, b) => a - b); if (!rows.length) return 0; return rows[Math.floor(rows.length / 2)]; }
+async function loadGpu() {
+  const select = $("gpuSource");
+  if (select && !select.value && select.options.length > 1) select.value = select.options[1].value;
+  const sourceId = select && select.value;
+  $("gpuBody").hidden = false;
+  if (!sourceId) { $("gpuStatus").textContent = "还没有可查看的数据源"; return; }
+  $("gpuStatus").textContent = "正在统计…";
+  try {
+    const body = await api("/api/reports/gpu", { method:"POST", body: new URLSearchParams({sourceId, window: $("gpuWindow").value}) });
+    gpuState.data = body;
+    const machines = body.machines || [];
+    if (!machines.some((item) => item.ip === gpuState.ip)) gpuState.ip = machines.length ? machines[0].ip : "";
+    renderGpu();
+    const tasks = machines.reduce((sum, item) => sum + Number(item.tasks || 0), 0);
+    const failed = machines.reduce((sum, item) => sum + Number(item.failed || 0), 0);
+    $("gpuStatus").textContent = body.from + " 至 " + body.to + "，" + machines.length + " 台机器，" + tasks + " 个任务，失败 " + failed;
+  } catch (error) { $("gpuStatus").textContent = error.message; }
+}
+function renderGpu() {
+  const body = gpuState.data || { machines: [], gpus: [] };
+  const machines = body.machines || [];
+  const box = $("gpuMachines");
+  if (!machines.length) { box.innerHTML = "<p class='meta'>这段时间没有任务。</p>"; $("gpuDetail").innerHTML = ""; return; }
+  box.innerHTML = "<div class='gpu-row head'><span>机器</span><span>任务</span><span>失败</span><span>解码 / 推理 / 编码</span><span>帧数</span></div>" + machines.map((item) => {
+    const parts = [["decode", item.decode_ms], ["infer", item.infer_ms], ["encode", item.encode_ms]].filter((part) => Number(part[1]) > 0);
+    const total = parts.reduce((sum, part) => sum + Number(part[1]), 0) || 1;
+    const bar = "<div class='gpu-stack'>" + parts.map((part) => `<i class="${part[0]}" style="width:${Math.round(Number(part[1]) / total * 100)}%"></i>`).join("") + "</div>";
+    const text = "解码 " + gpuSeconds(item.decode_ms) + " · 推理 " + gpuSeconds(item.infer_ms) + " · 编码 " + gpuSeconds(item.encode_ms);
+    return `<div class="gpu-row${item.ip === gpuState.ip ? " on" : ""}" data-ip="${esc(item.ip)}"><b>${esc(item.ip)}</b><span>${item.tasks}</span><span class="${item.failed ? "slow" : ""}">${item.failed}</span><div>${bar}<span class="meta">${text}</span></div><span>${gpuFrames(item.frames)}</span></div>`;
+  }).join("");
+  box.querySelectorAll(".gpu-row[data-ip]").forEach((row) => { row.onclick = () => { gpuState.ip = row.dataset.ip; renderGpu(); }; });
+  const cards = (body.gpus || []).filter((item) => item.ip === gpuState.ip);
+  const byId = {};
+  cards.forEach((item) => { byId[item.gpu_id] = item; });
+  const shown = [];
+  for (let id = 0; id < 8; id += 1) shown.push(byId[id] || { gpu_id: id, shots: 0, failed: 0, avg_ms: null });
+  const maxShots = Math.max(...shown.map((item) => Number(item.shots) || 0), 1);
+  const shotMedian = gpuMedian(shown.map((item) => Number(item.shots) || 0));
+  const timeMedian = gpuMedian(shown.map((item) => Number(item.avg_ms) || 0));
+  $("gpuDetail").innerHTML = `<h2 style="margin:16px 0 8px">${esc(gpuState.ip)} 的 8 张卡</h2><div class="gpu-cards">` + shown.map((item) => {
+    const low = shotMedian && item.shots && item.shots < shotMedian * 0.7;
+    const slow = timeMedian && item.avg_ms && item.avg_ms > timeMedian * 1.25;
+    const bad = item.failed || low || slow;
+    const mark = [item.failed ? "有失败" : "", low ? "任务偏少" : "", slow ? "偏慢" : ""].filter(Boolean).join(" · ");
+    return `<div class="gpu-card${bad ? " bad" : ""}"><b>GPU ${item.gpu_id}</b><div>${item.shots} 个镜头</div><div class="meta">平均 ${gpuSeconds(item.avg_ms)} · 失败 ${item.failed}${mark ? " · " + mark : ""}</div><div class="bar"><span style="width:${Math.round(item.shots / maxShots * 100)}%"></span></div></div>`;
+  }).join("") + "</div>";
+}
+$("gpuLoad").onclick = () => loadGpu();
+$("gpuFold").onclick = () => { $("gpuBody").hidden = true; };
+$("gpuWindow").onchange = () => { if (!$("gpuBody").hidden) loadGpu(); };
+$("gpuSource").onchange = () => { if (!$("gpuBody").hidden) loadGpu(); };
 
 fetch("/api/me").then(async (res) => { if (res.ok) { const me = await res.json(); enter(me.username, me.isAdmin, me.canCreateProject, me.canDataSource, me.canReport); } });
 </script></body></html>
