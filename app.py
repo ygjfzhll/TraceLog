@@ -944,6 +944,8 @@ def gpu_bounds(window):
         return now.replace(hour=0, minute=0, second=0), now
     if window == "7d":
         return now - timedelta(days=7), now
+    if window == "30d":
+        return now - timedelta(days=30), now
     return now - timedelta(hours=24), now
 
 
@@ -1078,6 +1080,175 @@ def gpu_report(source_id, window):
     }
 
 
+
+def gpu_step(window):
+    if window == "1h":
+        return 600, "10m"
+    if window in ("7d", "30d"):
+        return 86400, "day"
+    return 3600, "hour"
+
+
+def gpu_median(values):
+    rows = sorted(value for value in values if value)
+    if not rows:
+        return None
+    return rows[len(rows) // 2]
+
+
+def gpu_label(moment, kind):
+    if kind == "day":
+        return moment.strftime("%m-%d")
+    if kind == "10m":
+        return moment.strftime("%H:%M")
+    return moment.strftime("%m-%d %H:%M")
+
+
+def gpu_trend(source_id, window, ip):
+    if not re.fullmatch(r"[0-9A-Za-z.:_-]{1,64}", ip or ""):
+        raise ValueError("请选择机器")
+    start, end = gpu_bounds(window)
+    step, kind = gpu_step(window)
+    query_start = start if kind == "day" else start - timedelta(days=1)
+    with connect() as conn:
+        with conn.cursor() as cur:
+            ensure_data_sources(cur)
+            row = data_source_row(cur, source_id)
+    link = connect_data_source(row, 40)
+    try:
+        timing_tables = gpu_existing_tables(link, row["database_name"], "vsr_task_timing", gpu_months(query_start, end))
+        shot_tables = gpu_existing_tables(link, row["database_name"], "vsr_task_shot", gpu_months(start, end))
+        if not timing_tables:
+            raise ValueError("这个数据源没有视频增强任务表")
+        timing = {}
+        shots = {}
+        bucket_expr = "DATE(created_at)" if kind == "day" else "FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(created_at) / %s) * %s)"
+        bucket_args = () if kind == "day" else (step, step)
+        with link.cursor() as cur:
+            for name in timing_tables:
+                cur.execute(
+                    """
+                    SELECT private_server_ip AS ip,
+                           {bucket} AS bucket,
+                           COUNT(*) AS tasks, SUM(status='failed') AS failed,
+                           SUM(shots_infer_wall_ms) AS infer_sum, SUM(shots_infer_wall_ms IS NOT NULL) AS infer_n,
+                           SUM(total_frames) AS frames
+                    FROM `{table}`
+                    WHERE created_at >= %s AND created_at < %s AND private_server_ip <> ''
+                    GROUP BY ip, bucket
+                    """.format(bucket=bucket_expr, table=name),
+                    bucket_args + (query_start, end),
+                )
+                for item in cur.fetchall():
+                    host = str(item.get("ip") or "").strip()
+                    bucket = item.get("bucket")
+                    if not host or not bucket:
+                        continue
+                    slot = timing.setdefault((host, bucket), {})
+                    gpu_add(slot, item, ("tasks", "failed", "infer_sum", "infer_n", "frames"))
+            for name in shot_tables:
+                cur.execute(
+                    """
+                    SELECT {bucket} AS bucket,
+                           gpu_id, COUNT(*) AS shots, SUM(status='failed') AS failed,
+                           SUM(elapsed_ms) AS elapsed_sum, SUM(elapsed_ms IS NOT NULL) AS elapsed_n
+                    FROM `{table}`
+                    WHERE created_at >= %s AND created_at < %s AND private_server_ip = %s AND gpu_id IS NOT NULL
+                    GROUP BY bucket, gpu_id
+                    """.format(bucket=bucket_expr, table=name),
+                    bucket_args + (start, end, ip),
+                )
+                for item in cur.fetchall():
+                    bucket = item.get("bucket")
+                    try:
+                        gpu_id = int(item.get("gpu_id"))
+                    except (TypeError, ValueError):
+                        continue
+                    if not bucket or gpu_id < 0 or gpu_id > 15:
+                        continue
+                    slot = shots.setdefault((gpu_id, bucket), {})
+                    gpu_add(slot, item, ("shots", "failed", "elapsed_sum", "elapsed_n"))
+    finally:
+        link.close()
+    visible_from = start.date() if kind == "day" else start
+    buckets = sorted(moment for host, moment in timing if host == ip and moment >= visible_from)
+    fleet = {}
+    for (host, moment), item in timing.items():
+        if int(item.get("tasks") or 0) < 5:
+            continue
+        value = gpu_avg(item.get("infer_sum"), item.get("infer_n"))
+        if value:
+            fleet.setdefault(moment, []).append(value)
+    points = []
+    for moment in buckets:
+        item = timing.get((ip, moment), {})
+        prev = timing.get((ip, moment - timedelta(days=1)), {})
+        infer_ms = gpu_avg(item.get("infer_sum"), item.get("infer_n"))
+        fleet_ms = gpu_median(fleet.get(moment, []))
+        tasks = int(item.get("tasks") or 0)
+        points.append({
+            "time": gpu_label(moment, kind),
+            "tasks": tasks,
+            "failed": int(item.get("failed") or 0),
+            "infer_ms": infer_ms,
+            "frames": int(item.get("frames") or 0),
+            "fleet_infer_ms": None if fleet_ms is None else int(fleet_ms),
+            "prev_tasks": int(prev.get("tasks") or 0),
+            "prev_infer_ms": gpu_avg(prev.get("infer_sum"), prev.get("infer_n")),
+            "prev_frames": int(prev.get("frames") or 0),
+        })
+    task_mid = gpu_median([item["tasks"] for item in points if item["tasks"] >= 5]) or 0
+    for item in points:
+        quiet = bool(task_mid and item["tasks"] < task_mid * 0.5)
+        comparable = item["prev_tasks"] >= 5 and item["tasks"] >= item["prev_tasks"] * 0.5
+        item["quiet"] = quiet
+        item["slow"] = bool(not quiet and comparable and item["infer_ms"] and item["prev_infer_ms"] and item["infer_ms"] > item["prev_infer_ms"] * 1.15)
+    gpu_rows = []
+    for (gpu_id, moment), item in shots.items():
+        gpu_rows.append({
+            "gpu_id": gpu_id,
+            "time": gpu_label(moment, kind),
+            "order": moment.strftime("%Y-%m-%d %H:%M:%S"),
+            "shots": int(item.get("shots") or 0),
+            "failed": int(item.get("failed") or 0),
+            "avg_ms": gpu_avg(item.get("elapsed_sum"), item.get("elapsed_n")),
+        })
+    by_time = {}
+    for item in gpu_rows:
+        if item.get("avg_ms"):
+            by_time.setdefault(item["time"], []).append(item["avg_ms"])
+    for item in gpu_rows:
+        middle = gpu_median(by_time.get(item["time"], []))
+        item["slow"] = bool(middle and item.get("avg_ms") and item["avg_ms"] > middle * 1.25)
+    gpu_rows.sort(key=lambda item: (item["gpu_id"], item["order"]))
+    for item in gpu_rows:
+        item.pop("order", None)
+    return {"ip": ip, "step": kind, "points": points, "gpus": gpu_rows}
+
+
+def handle_gpu_trend(self):
+    form = read_form(self)
+    user = self._user()
+    if not user:
+        return
+    try:
+        if not module_allowed(user, "can_use_report"):
+            raise ValueError("没有日志报表权限")
+        source_id = (form.get("sourceId") or "").strip()
+        if not source_id.isdigit():
+            raise ValueError("请选择数据源")
+        if not can_query_source(user, source_id):
+            raise ValueError("没有这个数据源的权限")
+        window = (form.get("window") or "24h").strip()
+        if window not in ("1h", "6h", "24h", "today", "7d", "30d"):
+            window = "24h"
+        self._json(200, gpu_trend(source_id, window, (form.get("ip") or "").strip()))
+    except ValueError as exc:
+        self._json(400, {"error": str(exc)})
+    except Exception as exc:
+        self._json(400, {"error": str(exc)[:180]})
+
+
 def handle_gpu_report(self):
     form = read_form(self)
     user = self._user()
@@ -1092,7 +1263,7 @@ def handle_gpu_report(self):
         if not can_query_source(user, source_id):
             raise ValueError("没有这个数据源的权限")
         window = (form.get("window") or "24h").strip()
-        if window not in ("1h", "6h", "24h", "today", "7d"):
+        if window not in ("1h", "6h", "24h", "today", "7d", "30d"):
             window = "24h"
         self._json(200, gpu_report(source_id, window))
     except ValueError as exc:
@@ -1613,6 +1784,8 @@ def Handler_do_POST(self):
         return handle_saved_reports(self, "delete")
     if path == "/api/reports/saved":
         return handle_saved_reports(self, "save")
+    if path == "/api/reports/gpu/trend":
+        return handle_gpu_trend(self)
     if path == "/api/reports/gpu":
         return handle_gpu_report(self)
     if path == "/api/reports/tables":
@@ -1678,6 +1851,7 @@ _AUDIT_ACTIONS = {
     ("POST", "/api/data-sources/test"): "测试数据接入",
     ("POST", "/api/data-sources/list"): "查看数据接入",
     ("POST", "/api/reports/gpu"): "查看GPU机器",
+    ("POST", "/api/reports/gpu/trend"): "查看GPU机器变化",
     ("POST", "/api/reports/query"): "绘制报表",
     ("POST", "/api/reports/saved"): "保存报表",
     ("POST", "/api/reports/saved/delete"): "删除报表",

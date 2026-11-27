@@ -186,6 +186,24 @@ h2 { font-size:15px; margin:0 0 12px; font-weight:650; }
 .gpu-card.bad { border-color:#fecaca; background:#fff7f6; }
 .gpu-card .bar { height:6px; margin-top:8px; border-radius:99px; background:#e8eef7; overflow:hidden; }
 .gpu-card .bar span { display:block; height:100%; background:#2563eb; }
+
+.gpu-chart { width:100%; height:148px; }
+.gpu-chart polyline { fill:none; stroke-width:2; }
+.gpu-chart .mine polyline { stroke:#2563eb; }
+.gpu-chart .fleet polyline { stroke:#94a3b8; stroke-dasharray:4 3; }
+.gpu-chart .frame polyline { stroke:#7c3aed; stroke-width:1.5; }
+.gpu-chart circle { fill:#2563eb; }
+.gpu-chart circle.hot { fill:#d92d20; }
+.gpu-chart text { fill:#64748b; font-size:11px; text-anchor:middle; }
+.gpu-legend { display:flex; gap:14px; color:#64748b; font-size:12px; margin:8px 0; }
+.gpu-legend i { display:inline-block; width:14px; height:3px; margin-right:4px; vertical-align:middle; }
+.gpu-spark { width:100%; height:32px; display:block; }
+.gpu-spark polyline { fill:none; stroke:#2563eb; stroke-width:1.5; }
+.gpu-spark circle { fill:#d92d20; }
+.gpu-plot { position:relative; }
+.gpu-hit { fill:transparent; cursor:pointer; }
+.gpu-tip { position:absolute; z-index:2; pointer-events:none; background:#0f172a; color:#fff; border-radius:6px; padding:3px 8px; font-size:12px; white-space:nowrap; }
+.gpu-tip[hidden] { display:none !important; }
 </style>
 </head>
 <body>
@@ -306,7 +324,7 @@ h2 { font-size:15px; margin:0 0 12px; font-weight:650; }
 </form>
 <p class="meta" id="dataSourceStatus"></p></section>
 <section class="page" id="page-reports"><div class="top"><h1>日志报表</h1><button class="primary" id="reportNew" type="button">新建报表</button></div>
-<div class="card" id="gpuBoard" style="margin-bottom:14px"><div class="top"><h2>GPU 机器</h2><div class="gpu-tools"><select id="gpuSource"></select><select id="gpuWindow" class="window"><option value="1h">最近 1 小时</option><option value="6h">最近 6 小时</option><option value="24h" selected>最近 24 小时</option><option value="today">今天</option><option value="7d">最近 7 天</option></select><button class="primary" id="gpuLoad" type="button">查看</button><button class="ghost" id="gpuFold" type="button">收起</button></div></div>
+<div class="card" id="gpuBoard" style="margin-bottom:14px"><div class="top"><h2>GPU 机器</h2><div class="gpu-tools"><select id="gpuSource"></select><select id="gpuWindow" class="window"><option value="1h">最近 1 小时</option><option value="6h">最近 6 小时</option><option value="24h" selected>最近 24 小时</option><option value="today">今天</option><option value="7d">最近 7 天</option><option value="30d">最近一月</option></select><button class="primary" id="gpuLoad" type="button">查看</button><button class="ghost" id="gpuFold" type="button">收起</button></div></div>
 <div id="gpuBody" hidden><p class="meta" id="gpuStatus"></p>
 <div id="gpuMachines"></div><div id="gpuDetail"></div></div></div>
 <div class="card" id="reportList"></div>
@@ -1333,10 +1351,11 @@ async function loadGpu() {
     gpuState.data = body;
     const machines = body.machines || [];
     if (!machines.some((item) => item.ip === gpuState.ip)) gpuState.ip = machines.length ? machines[0].ip : "";
-    renderGpu();
     const tasks = machines.reduce((sum, item) => sum + Number(item.tasks || 0), 0);
     const failed = machines.reduce((sum, item) => sum + Number(item.failed || 0), 0);
     $("gpuStatus").textContent = body.from + " 至 " + body.to + "，" + machines.length + " 台机器，" + tasks + " 个任务，失败 " + failed;
+    gpuState.trend = null;
+    if (machines.length) loadGpuTrend(); else renderGpu();
   } catch (error) { $("gpuStatus").textContent = error.message; }
 }
 function renderGpu() {
@@ -1351,7 +1370,7 @@ function renderGpu() {
     const text = "解码 " + gpuSeconds(item.decode_ms) + " · 推理 " + gpuSeconds(item.infer_ms) + " · 编码 " + gpuSeconds(item.encode_ms);
     return `<div class="gpu-row${item.ip === gpuState.ip ? " on" : ""}" data-ip="${esc(item.ip)}"><b>${esc(item.ip)}</b><span>${item.tasks}</span><span class="${item.failed ? "slow" : ""}">${item.failed}</span><div>${bar}<span class="meta">${text}</span></div><span>${gpuFrames(item.frames)}</span></div>`;
   }).join("");
-  box.querySelectorAll(".gpu-row[data-ip]").forEach((row) => { row.onclick = () => { gpuState.ip = row.dataset.ip; renderGpu(); }; });
+  box.querySelectorAll(".gpu-row[data-ip]").forEach((row) => { row.onclick = () => { if (row.dataset.ip === gpuState.ip && gpuState.trend && gpuState.trend.ip === row.dataset.ip) return; gpuState.ip = row.dataset.ip; loadGpuTrend(); }; });
   const cards = (body.gpus || []).filter((item) => item.ip === gpuState.ip);
   const byId = {};
   cards.forEach((item) => { byId[item.gpu_id] = item; });
@@ -1360,13 +1379,147 @@ function renderGpu() {
   const maxShots = Math.max(...shown.map((item) => Number(item.shots) || 0), 1);
   const shotMedian = gpuMedian(shown.map((item) => Number(item.shots) || 0));
   const timeMedian = gpuMedian(shown.map((item) => Number(item.avg_ms) || 0));
-  $("gpuDetail").innerHTML = `<h2 style="margin:16px 0 8px">${esc(gpuState.ip)} 的 8 张卡</h2><div class="gpu-cards">` + shown.map((item) => {
+  const trend = gpuState.trend && gpuState.trend.ip === gpuState.ip ? gpuState.trend : null;
+  const series = trend ? (trend.gpus || []) : [];
+  let chart = "<h2 style=\"margin:14px 0 4px\">" + esc(gpuState.ip) + "</h2><p class='meta'>正在看这台机器的变化…</p>";
+  if (trend && trend.error) chart = "<p class='meta'>" + esc(trend.error) + "</p>";
+  else if (trend && (trend.points || []).length) chart = `<h2 style="margin:14px 0 4px">${esc(gpuState.ip)}</h2>${gpuChart(trend.points)}<div class="gpu-legend"><span><i style="background:#2563eb"></i>蓝线是推理耗时</span><span><i style="background:#7c3aed"></i>紫线是处理帧数</span></div><p class="meta">${esc(gpuOwnTrend(trend.points))}</p>`;
+  else if (trend) chart = "<p class='meta'>这段时间没有可比较的变化。</p>";
+  $("gpuDetail").innerHTML = chart + `<h2 style="margin:16px 0 8px">${esc(gpuState.ip)} 的 8 张卡</h2><div class="gpu-cards">` + shown.map((item) => {
     const low = shotMedian && item.shots && item.shots < shotMedian * 0.7;
     const slow = timeMedian && item.avg_ms && item.avg_ms > timeMedian * 1.25;
     const bad = item.failed || low || slow;
     const mark = [item.failed ? "有失败" : "", low ? "任务偏少" : "", slow ? "偏慢" : ""].filter(Boolean).join(" · ");
-    return `<div class="gpu-card${bad ? " bad" : ""}"><b>GPU ${item.gpu_id}</b><div>${item.shots} 个镜头</div><div class="meta">平均 ${gpuSeconds(item.avg_ms)} · 失败 ${item.failed}${mark ? " · " + mark : ""}</div><div class="bar"><span style="width:${Math.round(item.shots / maxShots * 100)}%"></span></div></div>`;
+    const spark = gpuSpark(series.filter((row) => row.gpu_id === item.gpu_id));
+    return `<div class="gpu-card${bad ? " bad" : ""}"><b>GPU ${item.gpu_id}</b><div>${item.shots} 个镜头</div><div class="meta">平均 ${gpuSeconds(item.avg_ms)} · 失败 ${item.failed}${mark ? " · " + mark : ""}</div>${spark || `<div class="bar"><span style="width:${Math.round(item.shots / maxShots * 100)}%"></span></div>`}</div>`;
   }).join("") + "</div>";
+  bindGpuTip();
+}
+function gpuTrendAvg(rows, field) {
+  const found = rows.filter((item) => Number(item[field]) > 0);
+  if (!found.length) return 0;
+  return found.reduce((sum, item) => sum + Number(item[field]), 0) / found.length;
+}
+function gpuWeightedInfer(rows) {
+  let weight = 0, total = 0;
+  rows.forEach((item) => {
+    const tasks = Number(item.tasks) || 0;
+    const infer = Number(item.infer_ms) || 0;
+    if (tasks > 0 && infer > 0) { weight += tasks; total += infer * tasks; }
+  });
+  return weight ? total / weight : gpuTrendAvg(rows, "infer_ms");
+}
+function gpuMsPerFrame(rows) {
+  let inferTime = 0, frames = 0;
+  rows.forEach((item) => {
+    const tasks = Number(item.tasks) || 0;
+    const infer = Number(item.infer_ms) || 0;
+    const frame = Number(item.frames) || 0;
+    if (tasks > 0 && infer > 0 && frame > 0) { inferTime += infer * tasks; frames += frame; }
+  });
+  return frames ? inferTime / frames : 0;
+}
+function gpuMsText(value) { return value ? Math.round(value) + " 毫秒/帧" : "-"; }
+function gpuOwnTrend(points) {
+  const rows = points || [];
+  rows.forEach((item) => { item.slow = false; });
+  const quiet = rows.filter((item) => item.quiet);
+  const busy = rows.filter((item) => !item.quiet && Number(item.infer_ms) > 0 && Number(item.frames) > 0 && Number(item.tasks) > 0);
+  if (busy.length < 2) return quiet.length ? "这段时间大多是低峰，任务少，看不出效率变化。" : "这段时间数据太少，看不出效率变化。";
+  const pieces = busy.length >= 6 ? 3 : 2;
+  const size = Math.floor(busy.length / pieces);
+  const chunks = [];
+  for (let index = 0; index < pieces; index += 1) {
+    const slice = index === pieces - 1 ? busy.slice(index * size) : busy.slice(index * size, (index + 1) * size);
+    chunks.push({ from: slice[0].time, to: slice[slice.length - 1].time, cost: gpuMsPerFrame(slice), infer: gpuWeightedInfer(slice), frames: gpuTrendAvg(slice, "frames"), rows: slice });
+  }
+  const early = chunks[0];
+  const last = chunks[chunks.length - 1];
+  const ratio = early.cost ? last.cost / early.cost : 1;
+  const verdict = ratio > 1.15 ? "效率下降" : ratio < 0.85 ? "效率提升" : "效率基本稳定";
+  const stages = chunks.map((item, index) => (chunks.length === 3 ? ["前段", "中段", "后段"][index] : ["前段", "后段"][index]) + " " + item.from + " 至 " + item.to + " 为 " + gpuMsText(item.cost)).join("，");
+  last.rows.forEach((item) => {
+    const cost = gpuMsPerFrame([item]);
+    if (early.cost && cost > early.cost * 1.15) item.slow = true;
+  });
+  let text = "指标是每帧推理耗时，等于推理总时间除以处理帧数，越低越快。" + stages + "。后段相对前段" + (ratio > 1 ? "高 " : "低 ") + Math.abs(Math.round((ratio - 1) * 100)) + "%，" + verdict + "。";
+  text += "任务平均耗时从 " + gpuSeconds(early.infer) + " 到 " + gpuSeconds(last.infer) + "，每天处理帧数从 " + gpuFrames(early.frames) + " 到 " + gpuFrames(last.frames) + "。耗时变长如果是画面变多，不算机器变慢。";
+  if (quiet.length) text += quiet.length + " 个低峰时段任务少，不计入。";
+  return text;
+}
+function gpuSegments(points, x, y, field) {
+  const parts = [];
+  let current = [];
+  points.forEach((item, index) => {
+    if (Number(item[field]) > 0) current.push(x(index) + "," + y(item[field]));
+    else if (current.length) { parts.push(current); current = []; }
+  });
+  if (current.length) parts.push(current);
+  return parts.map((seg) => `<polyline points="${seg.join(" ")}" />`).join("");
+}
+function gpuChart(points) {
+  const w = 720, h = 148, left = 28, right = 12, top = 12, bottom = 24;
+  const n = points.length;
+  const x = (index) => left + (n < 2 ? (w - left - right) / 2 : index * (w - left - right) / (n - 1));
+  const inferMax = Math.max(...points.map((item) => Math.max(Number(item.infer_ms) || 0, Number(item.fleet_infer_ms) || 0)), 1);
+  const frameMax = Math.max(...points.map((item) => Number(item.frames) || 0), 1);
+  const yInfer = (value) => top + (1 - (Number(value) || 0) / inferMax) * (h - top - bottom);
+  const yFrame = (value) => top + (1 - (Number(value) || 0) / frameMax) * (h - top - bottom);
+  const step = Math.max(1, Math.ceil(n / 6));
+  const labels = points.map((item, index) => index % step ? "" : `<text x="${x(index)}" y="${h - 6}">${esc(item.time)}</text>`).join("");
+  const dots = points.map((item, index) => {
+    if (!Number(item.infer_ms)) return "";
+    return `<circle cx="${x(index)}" cy="${yInfer(item.infer_ms)}" r="${item.slow ? 3.5 : 2}" class="${item.slow ? "hot" : ""}" />`;
+  }).join("");
+  const gap = n < 2 ? 36 : (w - left - right) / (n - 1);
+  const hits = points.map((item, index) => `<rect class="gpu-hit" data-time="${esc(item.time)}" x="${x(index) - gap / 2}" y="0" width="${gap}" height="${h - 18}" />`).join("");
+  return `<div class="gpu-plot"><svg viewBox="0 0 ${w} ${h}" class="gpu-chart"><g class="frame">${gpuSegments(points, x, yFrame, "frames")}</g><g class="mine">${gpuSegments(points, x, yInfer, "infer_ms")}</g>${dots}<g>${labels}</g>${hits}</svg><div class="gpu-tip" hidden></div></div>`;
+}
+function bindGpuTip() {
+  const plot = document.querySelector("#gpuDetail .gpu-plot");
+  if (!plot) return;
+  const tip = plot.querySelector(".gpu-tip");
+  plot.querySelectorAll(".gpu-hit").forEach((hit) => {
+    hit.onmousemove = (event) => {
+      const box = plot.getBoundingClientRect();
+      tip.hidden = false;
+      tip.textContent = hit.dataset.time || "";
+      let left = event.clientX - box.left + 12;
+      if (left > box.width - 96) left = event.clientX - box.left - 96;
+      tip.style.left = Math.max(0, left) + "px";
+      tip.style.top = Math.max(0, event.clientY - box.top - 28) + "px";
+    };
+  });
+  plot.onmouseleave = () => { tip.hidden = true; };
+}
+function gpuSpark(rows) {
+  const found = (rows || []).filter((item) => Number(item.avg_ms) > 0);
+  if (found.length < 2) return "";
+  const w = 180, h = 32, max = Math.max(...found.map((item) => Number(item.avg_ms) || 0), 1);
+  const x = (index) => found.length < 2 ? w / 2 : index * (w - 4) / (found.length - 1) + 2;
+  const y = (value) => 4 + (1 - (Number(value) || 0) / max) * (h - 8);
+  const line = found.map((item, index) => x(index) + "," + y(item.avg_ms)).join(" ");
+  const dots = found.map((item, index) => item.slow ? `<circle cx="${x(index)}" cy="${y(item.avg_ms)}" r="2" />` : "").join("");
+  return `<svg viewBox="0 0 ${w} ${h}" class="gpu-spark"><polyline points="${line}" />${dots}</svg>`;
+}
+let gpuTrendToken = 0;
+async function loadGpuTrend() {
+  const ip = gpuState.ip;
+  const sourceId = $("gpuSource") && $("gpuSource").value;
+  if (!ip || !sourceId) { renderGpu(); return; }
+  const token = ++gpuTrendToken;
+  gpuState.trend = null;
+  renderGpu();
+  try {
+    const body = await api("/api/reports/gpu/trend", { method:"POST", body: new URLSearchParams({sourceId, window: $("gpuWindow").value, ip}) });
+    if (token !== gpuTrendToken) return;
+    gpuState.trend = body;
+    renderGpu();
+  } catch (error) {
+    if (token !== gpuTrendToken) return;
+    gpuState.trend = { ip, error: error.message, points: [], gpus: [] };
+    renderGpu();
+  }
 }
 $("gpuLoad").onclick = () => loadGpu();
 $("gpuFold").onclick = () => { $("gpuBody").hidden = true; };
